@@ -1,9 +1,9 @@
-from collections import deque
+import json
 from app.models.event import AiboEvent
-
+from app.services.storage import storage
 class EventBus:
-    def __init__(self,max_events=1000): self._events=deque(maxlen=max_events)
-    def publish(self,event): self._events.append(event); return event
-    def recent(self,limit=50): return list(self._events)[-limit:]
-
+    def publish(self,event):storage.write("INSERT INTO events(type,payload,created_at) VALUES(?,?,?)",(event.type,json.dumps(event.payload),event.created_at.isoformat()));return event
+    def recent(self,limit=50):
+        rows=storage.execute("SELECT type,payload,created_at FROM events ORDER BY id DESC LIMIT ?",(limit,))
+        return [AiboEvent(type=r["type"],payload=json.loads(r["payload"]),created_at=r["created_at"]) for r in reversed(rows)]
 event_bus=EventBus()
