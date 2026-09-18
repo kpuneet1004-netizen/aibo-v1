@@ -1,0 +1,23 @@
+import sqlite3
+from pathlib import Path
+from threading import Lock
+from app.core.config import settings
+
+class Storage:
+    def __init__(self):
+        self.path=Path(settings.data_dir); self.path.mkdir(parents=True,exist_ok=True)
+        self.db=self.path/"aibo.db"; self._lock=Lock(); self._init()
+    def _connect(self):
+        c=sqlite3.connect(self.db,check_same_thread=False); c.row_factory=sqlite3.Row; return c
+    def _init(self):
+        with self._connect() as c:
+            c.executescript("""CREATE TABLE IF NOT EXISTS missions(id TEXT PRIMARY KEY,objective TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL,max_retries INTEGER NOT NULL,result TEXT,error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,mission_id TEXT NOT NULL,agent TEXT NOT NULL,action TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL,max_retries INTEGER NOT NULL,result TEXT,error TEXT);
+CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL);""")
+    def execute(self,sql,params=()):
+        with self._lock:
+            with self._connect() as c:return c.execute(sql,params).fetchall()
+    def write(self,sql,params=()):
+        with self._lock:
+            with self._connect() as c:c.execute(sql,params);c.commit()
+storage=Storage()
