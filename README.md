@@ -1,29 +1,26 @@
 # Aibo V1
 
-Aibo is a phone-first personal AI companion and assistant.
+Phone-first personal AI companion foundation.
 
-## V1 goals
+## M1
+FastAPI backend, mission model/store, events, agent registry, configuration, Docker and tests.
 
-- Mission-oriented task orchestration
-- Persistent memory foundation
-- Event-driven agent architecture
-- Agent registry
-- Health/status endpoint
-- Secure configuration via environment variables
-- API-first foundation for future Android/iOS clients
+## M2 — Mission Orchestration
+Adds mission API, task queue, background worker, agent dispatch, event bus, bounded retry/failure handling and worker status.
 
-## Status
+### Run
+```bash
+python -m venv .venv
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-V1 bootstrap — initial repository foundation.
+### API
+- GET /health
+- GET /v1/status
+- POST /v1/missions
+- GET /v1/missions/{mission_id}
+- GET /v1/events
+- GET /v1/worker
 
-## Architecture
-
-The first implementation is intentionally small and modular:
-
-- `app/` — FastAPI application
-- `app/core/` — configuration and shared primitives
-- `app/models/` — domain models
-- `app/services/` — memory, missions, events, and agents
-- `tests/` — automated tests
-
-No secrets or personal credentials belong in the repository.
+No secrets belong in Git. Use environment variables.
