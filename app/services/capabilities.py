@@ -1,25 +1,24 @@
 from collections.abc import Callable
 from typing import Any
+from app.services.llm import llm_client
 
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
 
 class CapabilityRegistry:
     def __init__(self) -> None:
         self._handlers: dict[str, Handler] = {}
-
     def register(self, name: str, handler: Handler) -> None:
         self._handlers[name] = handler
-
     def get(self, name: str) -> Handler | None:
         return self._handlers.get(name)
-
     def names(self) -> list[str]:
         return sorted(self._handlers)
 
+def execute_with_llm(payload: dict[str, Any]) -> dict[str, Any]:
+    objective = str(payload.get("objective", "")).strip()
+    if not objective:
+        raise ValueError("objective is required")
+    return llm_client.generate(objective)
+
 capability_registry = CapabilityRegistry()
-
-def execute_placeholder(payload: dict[str, Any]) -> dict[str, Any]:
-    objective = payload.get("objective", "")
-    return {"accepted": True, "objective": objective}
-
-capability_registry.register("execute", execute_placeholder)
+capability_registry.register("execute", execute_with_llm)
