@@ -83,6 +83,7 @@ def approve_mission(mission_id: str):
     for task in tasks:
         if task.status == TaskStatus.QUEUED:
             task.payload.pop("_requires_approval", None)
+            task.payload["_approval_granted"] = True
             task_store.save(task)
 
     for task in tasks:
