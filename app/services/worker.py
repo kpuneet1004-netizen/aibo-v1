@@ -18,11 +18,13 @@ class Worker:
         if self.running:
             return
         self._stop.clear()
-        for task in task_store.pending():
-            if task.status in {TaskStatus.QUEUED, TaskStatus.RUNNING}:
+        missions = {task.mission_id for task in task_store.pending()}
+        for mission_id in missions:
+            for task in task_store.ready_for_mission(mission_id):
                 task.status = TaskStatus.QUEUED
                 task_store.save(task)
                 task_queue.put(task)
+
         self._thread = Thread(target=self._run, name="aibo-worker", daemon=True)
         self._thread.start()
         self.running = True
