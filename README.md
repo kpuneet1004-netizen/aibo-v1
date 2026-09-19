@@ -103,6 +103,8 @@ The API is authenticated in production. For phone access over the internet, plac
 
 The V1 runtime remains a single-process worker by design. Horizontal scaling and distributed queues are out of scope for Alpha.
 
+A minimal phone web client is available at `/app`. It establishes a short-lived bearer session and lets the user submit and monitor missions from a mobile browser. For production internet access, serve the runtime behind HTTPS.
+
 
 ### Phone session authentication
 
