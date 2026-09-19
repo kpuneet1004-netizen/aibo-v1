@@ -5,19 +5,68 @@ from app.core.config import settings
 
 class Storage:
     def __init__(self):
-        self.path=Path(settings.data_dir); self.path.mkdir(parents=True,exist_ok=True)
-        self.db=self.path/"aibo.db"; self._lock=Lock(); self._init()
+        self.path = Path(settings.data_dir)
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.db = self.path / "aibo.db"
+        self._lock = Lock()
+        self._init()
+
     def _connect(self):
-        c=sqlite3.connect(self.db,check_same_thread=False); c.row_factory=sqlite3.Row; return c
+        c = sqlite3.connect(self.db, check_same_thread=False)
+        c.row_factory = sqlite3.Row
+        return c
+
     def _init(self):
         with self._connect() as c:
-            c.executescript("""CREATE TABLE IF NOT EXISTS missions(id TEXT PRIMARY KEY,objective TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL,max_retries INTEGER NOT NULL,result TEXT,error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,mission_id TEXT NOT NULL,agent TEXT NOT NULL,action TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL,max_retries INTEGER NOT NULL,result TEXT,error TEXT);
-CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL);""")
-    def execute(self,sql,params=()):
+            c.executescript("""
+                CREATE TABLE IF NOT EXISTS missions(
+                    id TEXT PRIMARY KEY,
+                    objective TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    max_retries INTEGER NOT NULL,
+                    result TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    plan TEXT
+                );
+                CREATE TABLE IF NOT EXISTS tasks(
+                    id TEXT PRIMARY KEY,
+                    mission_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    max_retries INTEGER NOT NULL,
+                    result TEXT,
+                    error TEXT
+                );
+                CREATE TABLE IF NOT EXISTS events(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+            """)
+            columns = {row["name"] for row in c.execute("PRAGMA table_info(missions)")}
+            if "plan" not in columns:
+                c.execute("ALTER TABLE missions ADD COLUMN plan TEXT")
+                c.commit()
+
+    def _connect_and_execute(self, sql, params=()):
+        with self._connect() as c:
+            return c.execute(sql, params).fetchall()
+
+    def execute(self, sql, params=()):
         with self._lock:
-            with self._connect() as c:return c.execute(sql,params).fetchall()
-    def write(self,sql,params=()):
+            return self._connect_and_execute(sql, params)
+
+    def write(self, sql, params=()):
         with self._lock:
-            with self._connect() as c:c.execute(sql,params);c.commit()
-storage=Storage()
+            with self._connect() as c:
+                c.execute(sql, params)
+                c.commit()
+
+storage = Storage()
