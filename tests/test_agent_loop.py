@@ -5,7 +5,7 @@ import pytest
 
 from app.main import app
 from app.models.task import MissionTask, TaskStatus
-from app.services.capabilities import capability_registry
+from app.services.capabilities import CapabilityDefinition, capability_registry
 from app.services.llm import llm_client
 from app.services.planner import Planner, PlannerError
 from app.services.tasks import task_store
@@ -70,3 +70,27 @@ def test_capability_contract_contains_risk_and_approval_metadata():
     fetch = next(item for item in contract if item["name"] == "fetch_url")
     assert fetch["risk"] == "external_read"
     assert fetch["requires_approval"] is False
+
+def test_planner_derives_approval_from_capability_risk(monkeypatch):
+    capability = CapabilityDefinition(
+        name="send_test",
+        description="Test consequential capability",
+        risk="external_write",
+        requires_approval=False,
+        handler=lambda payload: {"ok": True},
+    )
+    monkeypatch.setitem(capability_registry._definitions, capability.name, capability)
+
+    def fake_plan(objective, runtime_contract=None):
+        return {"steps": [{
+            "id": "step-1",
+            "objective": objective,
+            "capability": "send_test",
+            "agent": "general",
+            "payload": {},
+            "requires_approval": False,
+        }]}
+
+    monkeypatch.setattr(llm_client, "plan", fake_plan)
+    plan = Planner().plan("Send the test action")
+    assert plan.steps[0].requires_approval is True
