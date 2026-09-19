@@ -17,9 +17,13 @@ class TaskExecutor:
         task.attempts += 1
         task_store.save(task)
 
+        definition = capability_registry.definition(task.action)
+        if definition is None:
+            return self._fail(task, f"Capability unavailable: {task.action}")
+
         permission = permission_policy.evaluate(
-            requires_approval=bool(task.payload.get("_requires_approval", False)),
-            capability=task.action,
+            definition=definition,
+            approval_granted=bool(task.payload.get("_approval_granted", False)),
         )
         if not permission.allowed:
             return self._fail(task, permission.reason or "Permission required")
@@ -30,9 +34,7 @@ class TaskExecutor:
         if not agent_registry.can_execute(task.agent, task.action):
             return self._fail(task, f"Capability '{task.action}' unavailable for agent '{task.agent}'")
 
-        handler = capability_registry.get(task.action)
-        if handler is None:
-            return self._fail(task, f"Capability handler unavailable: {task.action}")
+        handler = definition.handler
 
         try:
             output = handler(task.payload)
