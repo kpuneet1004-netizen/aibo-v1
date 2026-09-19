@@ -23,8 +23,8 @@ agent_registry = AgentRegistry()
 for _agent in (
     AgentDefinition(
         name="general",
-        description="General Aibo reasoning and response agent.",
-        capabilities=["respond", "execute"],
+        description="General Aibo reasoning, web retrieval, and response agent.",
+        capabilities=["respond", "execute", "fetch_url"],
     ),
     AgentDefinition(
         name="design",
