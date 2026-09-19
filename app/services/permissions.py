@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from app.services.capabilities import CapabilityDefinition
+
 @dataclass(frozen=True)
 class PermissionDecision:
     allowed: bool
@@ -7,9 +9,18 @@ class PermissionDecision:
     reason: str | None = None
 
 class PermissionPolicy:
-    def evaluate(self, *, requires_approval: bool, capability: str) -> PermissionDecision:
-        if requires_approval:
-            return PermissionDecision(False, True, f"Capability '{capability}' requires user approval")
+    def evaluate(
+        self,
+        *,
+        definition: CapabilityDefinition,
+        approval_granted: bool = False,
+    ) -> PermissionDecision:
+        if definition.requires_approval and not approval_granted:
+            return PermissionDecision(
+                False,
+                True,
+                f"Capability '{definition.name}' requires user approval",
+            )
         return PermissionDecision(True, False)
 
 permission_policy = PermissionPolicy()
