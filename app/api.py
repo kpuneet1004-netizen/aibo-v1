@@ -2,7 +2,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from app.models.event import AiboEvent
 from app.models.mission import MissionCreate, MissionStatus
-from app.models.task import MissionTask
+from app.models.task import MissionTask, TaskStatus
 from app.services.events import event_bus
 from app.services.missions import mission_store
 from app.services.planner import planner
@@ -21,17 +21,21 @@ def create_mission(request: MissionCreate):
     try:
         plan = planner.plan(request.objective)
         mission.plan = [step.model_dump() for step in plan.steps]
+
+        step_task_ids = {step.id: str(uuid4()) for step in plan.steps}
         tasks = []
         for step in plan.steps:
+            payload = {
+                **step.payload,
+                "_requires_approval": step.requires_approval,
+                "_depends_on": [step_task_ids[dependency] for dependency in step.depends_on],
+            }
             task = MissionTask(
-                id=str(uuid4()),
+                id=step_task_ids[step.id],
                 mission_id=mission.id,
                 agent=step.agent,
                 action=step.capability,
-                payload={
-                    **step.payload,
-                    "_requires_approval": step.requires_approval,
-                },
+                payload=payload,
                 max_retries=request.max_retries,
             )
             task_store.save(task)
@@ -43,7 +47,8 @@ def create_mission(request: MissionCreate):
 
         if not needs_approval:
             for task in tasks:
-                worker.enqueue(task)
+                if not task.payload.get("_depends_on"):
+                    worker.enqueue(task)
 
         event_bus.publish(
             AiboEvent(
@@ -76,9 +81,12 @@ def approve_mission(mission_id: str):
 
     tasks = task_store.for_mission(mission_id)
     for task in tasks:
-        if task.status.value == "queued":
+        if task.status == TaskStatus.QUEUED:
             task.payload.pop("_requires_approval", None)
             task_store.save(task)
+
+    for task in tasks:
+        if task.status == TaskStatus.QUEUED and not task.payload.get("_depends_on"):
             worker.enqueue(task)
 
     mission.status = MissionStatus.RUNNING
