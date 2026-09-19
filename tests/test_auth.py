@@ -8,7 +8,8 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def clear_session_cookie():
+def clear_session_cookie(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "test")
     client.cookies.clear()
     yield
     client.cookies.clear()
