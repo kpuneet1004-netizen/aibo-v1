@@ -129,4 +129,7 @@ class TaskExecutor:
                 mission_store.update(mission)
         return task
 
+    def fail_unhandled(self, task, error):
+        return self._fail(task, f"Unhandled executor error: {error}")
+
 task_executor = TaskExecutor()
