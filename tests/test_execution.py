@@ -120,7 +120,12 @@ def test_worker_survives_unhandled_executor_exception(monkeypatch):
     worker.start()
     worker.enqueue(task)
     deadline = time.time() + 3
-    while time.time() < deadline and worker.running:
+    while time.time() < deadline:
+        current = task_store.get(task.id)
+        if current and current.status == TaskStatus.QUEUED and current.attempts >= 1:
+            break
         time.sleep(0.05)
+    assert worker.running is True
     worker.stop()
     assert worker.running is False
+    assert task_store.get(task.id).attempts == 1
