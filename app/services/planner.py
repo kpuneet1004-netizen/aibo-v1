@@ -47,11 +47,40 @@ class Planner:
                     agent=agent,
                     payload=dict(item.get("payload") or {}),
                     requires_approval=bool(item.get("requires_approval", False)),
+                    depends_on=list(item.get("depends_on") or []),
                 )
             )
 
         if not steps:
             raise PlannerError("Planner returned no steps")
+
+        ids = {step.id for step in steps}
+        for step in steps:
+            if step.id in step.depends_on:
+                raise PlannerError(f"Step cannot depend on itself: {step.id}")
+            unknown = set(step.depends_on) - ids
+            if unknown:
+                raise PlannerError(
+                    f"Step {step.id} depends on unknown step(s): {', '.join(sorted(unknown))}"
+                )
+
+        visiting = set()
+        visited = set()
+        graph = {step.id: set(step.depends_on) for step in steps}
+
+        def visit(step_id: str):
+            if step_id in visiting:
+                raise PlannerError("Planner returned a cyclic dependency graph")
+            if step_id in visited:
+                return
+            visiting.add(step_id)
+            for dependency in graph[step_id]:
+                visit(dependency)
+            visiting.remove(step_id)
+            visited.add(step_id)
+
+        for step_id in graph:
+            visit(step_id)
 
         return AgentPlan(objective=objective, steps=steps)
 
