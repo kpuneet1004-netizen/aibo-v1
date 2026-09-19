@@ -7,6 +7,7 @@ class PlanStep(BaseModel):
     agent: str = Field(min_length=1)
     payload: dict = Field(default_factory=dict)
     requires_approval: bool = False
+    depends_on: list[str] = Field(default_factory=list)
 
 class AgentPlan(BaseModel):
     objective: str = Field(min_length=1)
