@@ -29,9 +29,9 @@ class Worker:
                 task_store.save(task)
                 task_queue.put(task)
 
+        self.running = True
         self._thread = Thread(target=self._run, name="aibo-worker", daemon=True)
         self._thread.start()
-        self.running = True
         event_bus.publish(
             AiboEvent(type="worker.started", payload={"worker_id": self.worker_id})
         )
