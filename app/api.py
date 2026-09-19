@@ -1,6 +1,9 @@
 from uuid import uuid4
-from fastapi import APIRouter, HTTPException
+import secrets
+from fastapi import Depends
+from fastapi import APIRouter, Header, HTTPException
 from app.models.event import AiboEvent
+from app.core.config import settings
 from app.models.mission import MissionCreate, MissionStatus
 from app.models.task import MissionTask, TaskStatus
 from app.services.events import event_bus
@@ -12,7 +15,16 @@ from app.services.worker import worker
 
 router = APIRouter(prefix="/v1")
 
-@router.post("/missions")
+def require_api_key(x_aibo_api_key: str | None = Header(default=None)) -> None:
+    if not settings.api_key:
+        if settings.app_env.lower() in {"development", "test"}:
+            return
+        raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
+    if not x_aibo_api_key or not secrets.compare_digest(x_aibo_api_key, settings.api_key):
+        raise HTTPException(status_code=401, detail="Invalid Aibo API key")
+
+
+@router.post("/missions", dependencies=[Depends(require_api_key)])
 def create_mission(request: MissionCreate):
     mission = mission_store.create(request.objective, request.max_retries)
     mission.status = MissionStatus.PLANNING
@@ -71,7 +83,7 @@ def create_mission(request: MissionCreate):
         mission_store.update(mission)
         raise HTTPException(status_code=500, detail=f"Mission planning failed: {exc}") from exc
 
-@router.post("/missions/{mission_id}/approve")
+@router.post("/missions/{mission_id}/approve", dependencies=[Depends(require_api_key)])
 def approve_mission(mission_id: str):
     mission = mission_store.get(mission_id)
     if mission is None:
@@ -97,25 +109,25 @@ def approve_mission(mission_id: str):
     )
     return {"mission": mission, "tasks": tasks}
 
-@router.get("/missions/{mission_id}")
+@router.get("/missions/{mission_id}", dependencies=[Depends(require_api_key)])
 def get_mission(mission_id: str):
     mission = mission_store.get(mission_id)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission
 
-@router.get("/tasks/{task_id}")
+@router.get("/tasks/{task_id}", dependencies=[Depends(require_api_key)])
 def get_task(task_id: str):
     task = task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
-@router.get("/events")
+@router.get("/events", dependencies=[Depends(require_api_key)])
 def recent_events(limit: int = 50):
     return event_bus.recent(max(1, min(limit, 100)))
 
-@router.get("/worker")
+@router.get("/worker", dependencies=[Depends(require_api_key)])
 def worker_status():
     return {
         "worker_id": worker.worker_id,
