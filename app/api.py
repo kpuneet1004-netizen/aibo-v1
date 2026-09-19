@@ -5,6 +5,7 @@ from app.models.mission import MissionCreate, MissionStatus
 from app.models.task import MissionTask
 from app.services.events import event_bus
 from app.services.missions import mission_store
+from app.services.planner import planner
 from app.services.queue import task_queue
 from app.services.tasks import task_store
 from app.services.worker import worker
@@ -14,14 +15,78 @@ router = APIRouter(prefix="/v1")
 @router.post("/missions")
 def create_mission(request: MissionCreate):
     mission = mission_store.create(request.objective, request.max_retries)
-    agent = "design" if "design" in request.objective.lower() else "social"
-    task = MissionTask(id=str(uuid4()), mission_id=mission.id, agent=agent, action="execute", payload={"objective": request.objective}, max_retries=request.max_retries)
+    mission.status = MissionStatus.PLANNING
+    mission_store.update(mission)
+
+    try:
+        plan = planner.plan(request.objective)
+        mission.plan = [step.model_dump() for step in plan.steps]
+        tasks = []
+        for step in plan.steps:
+            task = MissionTask(
+                id=str(uuid4()),
+                mission_id=mission.id,
+                agent=step.agent,
+                action=step.capability,
+                payload={
+                    **step.payload,
+                    "_requires_approval": step.requires_approval,
+                },
+                max_retries=request.max_retries,
+            )
+            task_store.save(task)
+            tasks.append(task)
+
+        needs_approval = any(step.requires_approval for step in plan.steps)
+        mission.status = MissionStatus.WAITING_APPROVAL if needs_approval else MissionStatus.RUNNING
+        mission_store.update(mission)
+
+        if not needs_approval:
+            for task in tasks:
+                worker.enqueue(task)
+
+        event_bus.publish(
+            AiboEvent(
+                type="mission.created",
+                payload={
+                    "mission_id": mission.id,
+                    "task_ids": [task.id for task in tasks],
+                    "status": mission.status.value,
+                },
+            )
+        )
+        return {
+            "mission": mission,
+            "tasks": tasks,
+            "task": tasks[0],
+        }
+    except Exception as exc:
+        mission.status = MissionStatus.FAILED
+        mission.error = str(exc)
+        mission_store.update(mission)
+        raise HTTPException(status_code=500, detail=f"Mission planning failed: {exc}") from exc
+
+@router.post("/missions/{mission_id}/approve")
+def approve_mission(mission_id: str):
+    mission = mission_store.get(mission_id)
+    if mission is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    if mission.status != MissionStatus.WAITING_APPROVAL:
+        raise HTTPException(status_code=409, detail="Mission is not waiting for approval")
+
+    tasks = task_store.for_mission(mission_id)
+    for task in tasks:
+        if task.status.value == "queued":
+            task.payload.pop("_requires_approval", None)
+            task_store.save(task)
+            worker.enqueue(task)
+
     mission.status = MissionStatus.RUNNING
     mission_store.update(mission)
-    task_store.save(task)
-    worker.enqueue(task)
-    event_bus.publish(AiboEvent(type="mission.created", payload={"mission_id": mission.id, "task_id": task.id}))
-    return {"mission": mission, "task": task}
+    event_bus.publish(
+        AiboEvent(type="mission.approved", payload={"mission_id": mission_id})
+    )
+    return {"mission": mission, "tasks": tasks}
 
 @router.get("/missions/{mission_id}")
 def get_mission(mission_id: str):
@@ -43,4 +108,8 @@ def recent_events(limit: int = 50):
 
 @router.get("/worker")
 def worker_status():
-    return {"worker_id": worker.worker_id, "running": worker.running, "queue_size": task_queue.size()}
+    return {
+        "worker_id": worker.worker_id,
+        "running": worker.running,
+        "queue_size": task_queue.size(),
+    }
