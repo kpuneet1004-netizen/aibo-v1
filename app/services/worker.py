@@ -60,7 +60,9 @@ class Worker:
                     if result.status == TaskStatus.QUEUED:
                         self.enqueue(result)
                 except Exception as exc:
-                    task_executor.fail_unhandled(task, exc)
+                    result = task_executor.fail_unhandled(task, exc)
+                    if result.status == TaskStatus.QUEUED:
+                        self.enqueue(result)
                 finally:
                     task_queue.task_done()
         finally:
