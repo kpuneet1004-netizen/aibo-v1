@@ -30,3 +30,9 @@ def test_invalid_bearer_token_is_rejected(monkeypatch):
         headers={"Authorization": "Bearer invalid"},
     )
     assert response.status_code == 401
+
+
+def test_phone_client_is_available():
+    response = client.get("/app")
+    assert response.status_code == 200
+    assert "Aibo" in response.text
