@@ -76,8 +76,29 @@ Copy `.env.example` to `.env` and configure the provider when using a real OpenA
 
 ## Persistence and recovery
 
-SQLite stores missions, plans, tasks, and events under the configured data directory. The current single-process worker re-enqueues persisted queued tasks whose prerequisites are already completed. Orphaned `RUNNING` task recovery is a separate reliability fix being prepared before the phone-facing runtime is considered production-ready.
+SQLite stores missions, plans, tasks, and events under the configured data directory. The current single-process worker re-enqueues persisted queued tasks whose prerequisites are already completed and reclaims orphaned `RUNNING` tasks after a process restart. Unexpected executor exceptions are isolated to the task, retried within the configured limit, and do not terminate the worker loop.
 
 ## Security boundary
 
 Aibo is designed around least-authority execution. A plan can mark a step as requiring approval, and the runtime blocks it until the mission is explicitly approved. The current policy is intentionally conservative and is a first permission boundary, not the final authorization model.
+
+
+## Container deployment
+
+For a persistent single-instance Alpha runtime:
+
+1. Copy `.env.example` to `.env`.
+2. Set `APP_ENV=production`.
+3. Set a strong random `AIBO_API_KEY`.
+4. Configure the real LLM provider and model only when ready; the stub provider remains deterministic.
+5. Start Aibo with:
+
+```bash
+docker compose up -d --build
+```
+
+The SQLite database is stored in the named `aibo-data` volume, so container replacement does not discard mission state.
+
+The API is authenticated in production. For phone access over the internet, place the container behind an HTTPS reverse proxy or managed TLS endpoint; do not expose the raw HTTP port directly to the public internet. The `/health` endpoint is unauthenticated for infrastructure health checks, while `/v1/*` requires `X-Aibo-API-Key`.
+
+The V1 runtime remains a single-process worker by design. Horizontal scaling and distributed queues are out of scope for Alpha.
