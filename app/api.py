@@ -1,6 +1,11 @@
 from uuid import uuid4
+import base64
+import hashlib
+import hmac
+import json
 import secrets
-from fastapi import Depends
+import time
+from fastapi import Depends, Request
 from fastapi import APIRouter, Header, HTTPException
 from app.models.event import AiboEvent
 from app.core.config import settings
@@ -15,14 +20,51 @@ from app.services.worker import worker
 
 router = APIRouter(prefix="/v1")
 
-def require_api_key(x_aibo_api_key: str | None = Header(default=None)) -> None:
+def _encode_session(expiry: int) -> str:
+    payload = {"exp": expiry, "nonce": secrets.token_urlsafe(12)}
+    body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+    signature = hmac.new(settings.api_key.encode(), body.encode(), hashlib.sha256).hexdigest()
+    return f"{body}.{signature}"
+
+def _valid_session(token: str) -> bool:
+    try:
+        body, signature = token.split(".", 1)
+        expected = hmac.new(settings.api_key.encode(), body.encode(), hashlib.sha256).hexdigest()
+        if not secrets.compare_digest(signature, expected):
+            return False
+        padded = body + "=" * (-len(body) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        return int(payload["exp"]) > int(time.time())
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+
+def require_api_key(
+    request: Request,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> None:
     if not settings.api_key:
         if settings.app_env.lower() in {"development", "test"}:
             return
         raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
-    if not x_aibo_api_key or not secrets.compare_digest(x_aibo_api_key, settings.api_key):
-        raise HTTPException(status_code=401, detail="Invalid Aibo API key")
+    if x_aibo_api_key and secrets.compare_digest(x_aibo_api_key, settings.api_key):
+        return
+    if authorization and authorization.startswith("Bearer ") and _valid_session(authorization[7:].strip()):
+        return
+    raise HTTPException(status_code=401, detail="Invalid Aibo API credentials")
 
+
+
+@router.post("/session", dependencies=[Depends(require_api_key)])
+def create_session():
+    if not settings.api_key:
+        raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
+    expires_at = int(time.time()) + settings.session_ttl_seconds
+    return {
+        "token": _encode_session(expires_at),
+        "token_type": "Bearer",
+        "expires_at": expires_at,
+    }
 
 @router.post("/missions", dependencies=[Depends(require_api_key)])
 def create_mission(request: MissionCreate):
