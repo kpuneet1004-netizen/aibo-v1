@@ -5,8 +5,7 @@ import hmac
 import json
 import secrets
 import time
-from fastapi import Depends, Request
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
 from app.models.event import AiboEvent
 from app.core.config import settings
 from app.models.mission import MissionCreate, MissionStatus
@@ -20,11 +19,13 @@ from app.services.worker import worker
 
 router = APIRouter(prefix="/v1")
 
+
 def _encode_session(expiry: int) -> str:
     payload = {"exp": expiry, "nonce": secrets.token_urlsafe(12)}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     signature = hmac.new(settings.api_key.encode(), body.encode(), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
+
 
 def _valid_session(token: str) -> bool:
     try:
@@ -38,33 +39,62 @@ def _valid_session(token: str) -> bool:
     except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
         return False
 
-def require_api_key(
-    request: Request,
-    x_aibo_api_key: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
-) -> None:
+
+def _configured_api_key() -> None:
     if not settings.api_key:
         if settings.app_env.lower() in {"development", "test"}:
             return
         raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
-    if x_aibo_api_key and secrets.compare_digest(x_aibo_api_key, settings.api_key):
+
+
+def require_bootstrap_key(
+    x_aibo_api_key: str | None = Header(default=None),
+) -> None:
+    _configured_api_key()
+    if not settings.api_key:
         return
-    if authorization and authorization.startswith("Bearer ") and _valid_session(authorization[7:].strip()):
+    if x_aibo_api_key and secrets.compare_digest(x_aibo_api_key, settings.api_key):
         return
     raise HTTPException(status_code=401, detail="Invalid Aibo API credentials")
 
 
-
-@router.post("/session", dependencies=[Depends(require_api_key)])
-def create_session():
+def require_api_key(
+    request: Request,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+) -> None:
+    _configured_api_key()
     if not settings.api_key:
-        raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
+        return
+    if x_aibo_api_key and secrets.compare_digest(x_aibo_api_key, settings.api_key):
+        return
+    if authorization and authorization.startswith("Bearer ") and _valid_session(authorization[7:].strip()):
+        return
+    if aibo_session and _valid_session(aibo_session):
+        return
+    raise HTTPException(status_code=401, detail="Invalid Aibo API credentials")
+
+
+@router.post("/session", dependencies=[Depends(require_bootstrap_key)])
+def create_session(response: Response):
     expires_at = int(time.time()) + settings.session_ttl_seconds
+    token = _encode_session(expires_at)
+    response.set_cookie(
+        key="aibo_session",
+        value=token,
+        max_age=settings.session_ttl_seconds,
+        httponly=True,
+        secure=settings.app_env.lower() == "production",
+        samesite="strict",
+        path="/",
+    )
     return {
-        "token": _encode_session(expires_at),
+        "token": token,
         "token_type": "Bearer",
         "expires_at": expires_at,
     }
+
 
 @router.post("/missions", dependencies=[Depends(require_api_key)])
 def create_mission(request: MissionCreate):
@@ -125,6 +155,7 @@ def create_mission(request: MissionCreate):
         mission_store.update(mission)
         raise HTTPException(status_code=500, detail=f"Mission planning failed: {exc}") from exc
 
+
 @router.post("/missions/{mission_id}/approve", dependencies=[Depends(require_api_key)])
 def approve_mission(mission_id: str):
     mission = mission_store.get(mission_id)
@@ -151,12 +182,14 @@ def approve_mission(mission_id: str):
     )
     return {"mission": mission, "tasks": tasks}
 
+
 @router.get("/missions/{mission_id}", dependencies=[Depends(require_api_key)])
 def get_mission(mission_id: str):
     mission = mission_store.get(mission_id)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission
+
 
 @router.get("/tasks/{task_id}", dependencies=[Depends(require_api_key)])
 def get_task(task_id: str):
@@ -165,9 +198,11 @@ def get_task(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
+
 @router.get("/events", dependencies=[Depends(require_api_key)])
 def recent_events(limit: int = 50):
     return event_bus.recent(max(1, min(limit, 100)))
+
 
 @router.get("/worker", dependencies=[Depends(require_api_key)])
 def worker_status():
