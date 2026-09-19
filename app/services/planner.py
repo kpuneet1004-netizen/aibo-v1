@@ -2,6 +2,7 @@ from app.models.planning import AgentPlan, PlanStep
 from app.services.agents import agent_registry
 from app.services.capabilities import capability_registry
 from app.services.llm import llm_client
+from app.services.permissions import permission_policy
 
 class PlannerError(RuntimeError):
     pass
@@ -37,7 +38,7 @@ class Planner:
             steps.append(PlanStep(
                 id=step_id, objective=step_objective, capability=capability, agent=agent,
                 payload=dict(item.get("payload") or {}),
-                requires_approval=bool(item.get("requires_approval", False)) or definition.requires_approval,
+                requires_approval=bool(item.get("requires_approval", False)) or permission_policy.requires_approval(definition),
                 depends_on=list(item.get("depends_on") or []),
             ))
         if not steps:
