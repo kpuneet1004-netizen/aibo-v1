@@ -18,6 +18,10 @@ class Worker:
         if self.running:
             return
         self._stop.clear()
+        for task in task_store.pending():
+            if task.status == TaskStatus.RUNNING:
+                task.status = TaskStatus.QUEUED
+                task_store.save(task)
         missions = {task.mission_id for task in task_store.pending()}
         for mission_id in missions:
             for task in task_store.ready_for_mission(mission_id):
@@ -35,6 +39,8 @@ class Worker:
     def stop(self):
         self._stop.set()
         self.running = False
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
         event_bus.publish(
             AiboEvent(type="worker.stopped", payload={"worker_id": self.worker_id})
         )
@@ -43,14 +49,21 @@ class Worker:
         task_queue.put(task)
 
     def _run(self):
-        while not self._stop.is_set():
-            task = task_queue.get_nowait()
-            if task is None:
-                self._stop.wait(0.1)
-                continue
-            result = task_executor.execute(task)
-            if result.status == TaskStatus.QUEUED:
-                self.enqueue(result)
-            task_queue.task_done()
+        try:
+            while not self._stop.is_set():
+                task = task_queue.get_nowait()
+                if task is None:
+                    self._stop.wait(0.1)
+                    continue
+                try:
+                    result = task_executor.execute(task)
+                    if result.status == TaskStatus.QUEUED:
+                        self.enqueue(result)
+                except Exception as exc:
+                    task_executor.fail_unhandled(task, exc)
+                finally:
+                    task_queue.task_done()
+        finally:
+            self.running = False
 
 worker = Worker()
