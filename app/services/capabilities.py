@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 import ipaddress
+import socket
 import httpx
 from app.services.llm import llm_client
 
@@ -63,6 +64,27 @@ def _validate_public_url(url: str) -> None:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
+        try:
+            resolved = socket.getaddrinfo(
+                host,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        except socket.gaierror as exc:
+            raise ValueError("hostname could not be resolved") from exc
+        if not resolved:
+            raise ValueError("hostname did not resolve to an address")
+        for entry in resolved:
+            address = ipaddress.ip_address(entry[4][0])
+            if (
+                address.is_private
+                or address.is_loopback
+                or address.is_link_local
+                or address.is_multicast
+                or address.is_reserved
+                or address.is_unspecified
+            ):
+                raise ValueError("hostname resolves to a private or local IP address")
         return
     if address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_reserved or address.is_unspecified:
         raise ValueError("private or local IP addresses are not allowed")
