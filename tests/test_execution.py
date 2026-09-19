@@ -114,18 +114,29 @@ def test_worker_survives_unhandled_executor_exception(monkeypatch):
         action="respond", payload={"objective": "Worker survives exception"})
     task_store.save(task)
     worker = Worker()
-    def explode(_task):
-        raise RuntimeError("boom")
-    monkeypatch.setattr(task_executor, "execute", explode)
+    original_evaluate = __import__("app.services.permissions", fromlist=["permission_policy"]).permission_policy.evaluate
+    calls = {"count": 0}
+
+    def explode_once(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("boom")
+        return original_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(
+        __import__("app.services.permissions", fromlist=["permission_policy"]).permission_policy,
+        "evaluate",
+        explode_once,
+    )
     worker.start()
     worker.enqueue(task)
     deadline = time.time() + 3
     while time.time() < deadline:
         current = task_store.get(task.id)
-        if current and current.status == TaskStatus.QUEUED and current.attempts >= 1:
+        if current and current.status == TaskStatus.COMPLETED:
             break
         time.sleep(0.05)
     assert worker.running is True
+    assert task_store.get(task.id).attempts == 2
     worker.stop()
     assert worker.running is False
-    assert task_store.get(task.id).attempts == 1
