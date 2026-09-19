@@ -1,48 +1,80 @@
 # Aibo V1
 
-Phone-first personal AI companion foundation.
+Aibo V1 is the execution core for a personal AI assistant: objective in, plan, permission check, capability execution, verification, recovery, and truthful completion.
 
-## Product direction
+## Current loop
 
-Aibo is a personal AI operating companion: the user gives an objective, Aibo reasons about what is required, creates a plan, selects available capabilities, executes work, verifies outcomes, handles recoverable failures and asks for authorization only when it is genuinely required.
+1. Accept an objective.
+2. Ask the planning engine for the smallest useful plan.
+3. Validate every planned capability and agent against the runtime registry.
+4. Validate step dependencies as a directed acyclic graph.
+5. Persist the mission, plan, tasks, and events in SQLite.
+6. Hold the mission when a planned step requires approval.
+7. Queue only dependency-ready tasks.
+8. Execute the selected capability through the registered agent.
+9. Verify the capability result.
+10. Advance newly unblocked dependent steps.
+11. Retry bounded failures or mark the mission failed.
+12. Mark the mission completed only after every step is verified.
 
-The LLM provides reasoning. The Aibo runtime owns execution state, permissions, retries, verification and truthful completion.
+The LLM proposes intent and sequencing. The runtime owns state, permissions, execution, verification, and completion truth.
 
-## Current V1 agent loop
+## Current runtime capabilities
 
-1. Receive objective
-2. Create a structured plan
-3. Select an agent and capability for each step
-4. Apply the permission gate
-5. Execute the capability
-6. Verify the returned result
-7. Retry or fail truthfully when necessary
-8. Complete the mission only when all planned steps are verified
-9. Persist mission, task and event state
+The deterministic test runtime currently exposes:
+- `respond`: generate an Aibo response through the configured LLM provider.
+- `execute`: compatibility alias for `respond`.
 
-The current deterministic CI/stub environment uses a general respond capability. External tools and services are not fabricated when they are not available.
-
-## Persistence and recovery
-
-SQLite stores missions, plans, tasks and events. Queued/running tasks are reloaded when the worker starts so an application restart does not silently discard pending work.
+External integrations are intentionally not faked. New capabilities should be added only when their real execution and verification path exists.
 
 ## API
 
-- GET /health
-- GET /v1/status
-- POST /v1/missions
-- POST /v1/missions/{mission_id}/approve
-- GET /v1/missions/{mission_id}
-- GET /v1/tasks/{task_id}
-- GET /v1/events
-- GET /v1/worker
+Run locally:
 
-## Run
-
-python -m venv .venv
-pip install -r requirements.txt
+```bash
 uvicorn app.main:app --reload
+```
 
-For deterministic local/CI execution, keep LLM_PROVIDER=stub.
+Create a mission:
 
-No secrets belong in Git. Use environment variables.
+```bash
+curl -X POST http://localhost:8000/v1/missions \
+  -H "Content-Type: application/json" \
+  -d '{"objective":"Explain the current objective"}'
+```
+
+Inspect a mission:
+
+```bash
+curl http://localhost:8000/v1/missions/<mission_id>
+```
+
+Approve a mission waiting for authorization:
+
+```bash
+curl -X POST http://localhost:8000/v1/missions/<mission_id>/approve
+```
+
+Inspect a task:
+
+```bash
+curl http://localhost:8000/v1/tasks/<task_id>
+```
+
+Inspect recent events:
+
+```bash
+curl http://localhost:8000/v1/events
+```
+
+## LLM configuration
+
+Copy `.env.example` to `.env` and configure the provider when using a real OpenAI-compatible endpoint. CI and deterministic tests use the stub provider.
+
+## Persistence and recovery
+
+SQLite stores missions, plans, tasks, and events under the configured data directory. On worker startup, queued/running tasks are recovered, but only tasks whose prerequisites are already completed are re-enqueued.
+
+## Security boundary
+
+Aibo is designed around least-authority execution. A plan can mark a step as requiring approval, and the runtime blocks it until the mission is explicitly approved. The current policy is intentionally conservative and is a first permission boundary, not the final authorization model.
