@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<title>Aibo</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#eee;background:#0b0b0c}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#202025,#0b0b0c 55%);display:flex;justify-content:center}
+main{width:min(680px,100%);padding:24px 18px 32px}
+h1{font-size:34px;margin:12px 0 4px}.sub{color:#999;margin-bottom:24px}
+.card{background:#151518;border:1px solid #2a2a2f;border-radius:18px;padding:16px;margin-bottom:14px}
+label{display:block;font-size:13px;color:#aaa;margin-bottom:7px}
+input,textarea,button{width:100%;font:inherit;border-radius:12px;border:1px solid #333;background:#0f0f11;color:#fff;padding:12px}
+textarea{min-height:110px;resize:vertical}button{background:#fff;color:#111;border:0;font-weight:700;margin-top:10px;cursor:pointer}
+button:disabled{opacity:.5}.status{white-space:pre-wrap;color:#bbb;line-height:1.5}.hidden{display:none}
+</style>
+</head>
+<body><main>
+<h1>Aibo</h1><div class="sub">Personal AI execution core · Alpha</div>
+<section id="login" class="card">
+<label>API key — used only to establish a session</label>
+<input id="key" type="password" autocomplete="off" placeholder="AIBO_API_KEY">
+<button id="connect">Connect</button>
+</section>
+<section id="mission" class="card hidden">
+<label>What should Aibo do?</label>
+<textarea id="objective" placeholder="e.g. Fetch https://example.com and inspect it"></textarea>
+<button id="run">Run mission</button>
+</section>
+<section id="result" class="card hidden"><div class="status" id="status"></div></section>
+</main>
+<script>
+const tokenKey="aibo_session";
+const token=()=>sessionStorage.getItem(tokenKey);
+const headers=()=>({Authorization:"Bearer "+token(),"Content-Type":"application/json"});
+const $=id=>document.getElementById(id);
+function connected(){ $("login").classList.add("hidden"); $("mission").classList.remove("hidden"); }
+if(token()) connected();
+$("connect").onclick=async()=>{
+  const key=$("key").value.trim(); if(!key)return;
+  $("connect").disabled=true;
+  try{
+    const r=await fetch("/v1/session",{method:"POST",headers:{"X-Aibo-API-Key":key}});
+    if(!r.ok) throw new Error("Authentication failed");
+    const body=await r.json(); sessionStorage.setItem(tokenKey,body.token); $("key").value=""; connected();
+  }catch(e){$("status").textContent=e.message; $("result").classList.remove("hidden")}
+  finally{$("connect").disabled=false}
+};
+$("run").onclick=async()=>{
+  const objective=$("objective").value.trim(); if(!objective)return;
+  $("run").disabled=true; $("result").classList.remove("hidden"); $("status").textContent="Planning…";
+  try{
+    const r=await fetch("/v1/missions",{method:"POST",headers:headers(),body:JSON.stringify({objective})});
+    if(!r.ok) throw new Error(await r.text());
+    const body=await r.json(); const id=body.mission.id; $("status").textContent="Mission "+id+"\nStatus: "+body.mission.status;
+    for(let i=0;i<60;i++){
+      await new Promise(x=>setTimeout(x,500));
+      const m=await fetch("/v1/missions/"+id,{headers:{Authorization:"Bearer "+token()}});
+      if(m.status===401){sessionStorage.removeItem(tokenKey);location.reload();return}
+      const mission=await m.json(); $("status").textContent="Mission "+id+"\nStatus: "+mission.status;
+      if(["completed","failed","cancelled","waiting_approval"].includes(mission.status)){if(mission.result)$("status").textContent+="\n\n"+JSON.stringify(mission.result,null,2);break}
+    }
+  }catch(e){$("status").textContent="Error: "+e.message}
+  finally{$("run").disabled=false}
+};
+</script>
+</body></html>
