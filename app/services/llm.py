@@ -49,6 +49,10 @@ class LLMClient:
     def plan(self, objective: str, runtime_contract: str | None = None) -> dict[str, Any]:
         provider = settings.llm_provider.lower().strip()
         if provider == "stub":
+            import re
+            urls = re.findall(r"https?://[^\\s]+", objective)
+            if urls:
+                return {"steps": [{"id": "step-1", "objective": objective, "capability": "fetch_url", "agent": "general", "payload": {"url": urls[0].rstrip(".,)")}, "requires_approval": False, "depends_on": []}]}
             return {"steps": [{"id": "step-1", "objective": objective, "capability": "respond", "agent": "general", "payload": {"objective": objective}, "requires_approval": False, "depends_on": []}]}
         user_prompt = objective
         if runtime_contract:
