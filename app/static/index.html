@@ -32,19 +32,21 @@ button:disabled{opacity:.5}.status{white-space:pre-wrap;color:#bbb;line-height:1
 <section id="result" class="card hidden"><div class="status" id="status"></div></section>
 </main>
 <script>
-const tokenKey="aibo_session";
-const token=()=>sessionStorage.getItem(tokenKey);
-const headers=()=>({Authorization:"Bearer "+token(),"Content-Type":"application/json"});
 const $=id=>document.getElementById(id);
+const authHeaders=()=>({"Content-Type":"application/json"});
 function connected(){ $("login").classList.add("hidden"); $("mission").classList.remove("hidden"); }
-if(token()) connected();
+async function checkSession(){
+  const r=await fetch("/v1/status");
+  if(r.ok) connected();
+}
+checkSession();
 $("connect").onclick=async()=>{
   const key=$("key").value.trim(); if(!key)return;
   $("connect").disabled=true;
   try{
     const r=await fetch("/v1/session",{method:"POST",headers:{"X-Aibo-API-Key":key}});
     if(!r.ok) throw new Error("Authentication failed");
-    const body=await r.json(); sessionStorage.setItem(tokenKey,body.token); $("key").value=""; connected();
+    await r.json(); $("key").value=""; connected();
   }catch(e){$("status").textContent=e.message; $("result").classList.remove("hidden")}
   finally{$("connect").disabled=false}
 };
@@ -52,13 +54,13 @@ $("run").onclick=async()=>{
   const objective=$("objective").value.trim(); if(!objective)return;
   $("run").disabled=true; $("result").classList.remove("hidden"); $("status").textContent="Planning…";
   try{
-    const r=await fetch("/v1/missions",{method:"POST",headers:headers(),body:JSON.stringify({objective})});
+    const r=await fetch("/v1/missions",{method:"POST",headers:authHeaders(),body:JSON.stringify({objective})});
     if(!r.ok) throw new Error(await r.text());
     const body=await r.json(); const id=body.mission.id; $("status").textContent="Mission "+id+"\nStatus: "+body.mission.status;
     for(let i=0;i<60;i++){
       await new Promise(x=>setTimeout(x,500));
-      const m=await fetch("/v1/missions/"+id,{headers:{Authorization:"Bearer "+token()}});
-      if(m.status===401){sessionStorage.removeItem(tokenKey);location.reload();return}
+      const m=await fetch("/v1/missions/"+id);
+      if(m.status===401){location.reload();return}
       const mission=await m.json(); $("status").textContent="Mission "+id+"\nStatus: "+mission.status;
       if(["completed","failed","cancelled","waiting_approval"].includes(mission.status)){if(mission.result)$("status").textContent+="\n\n"+JSON.stringify(mission.result,null,2);break}
     }
