@@ -1,6 +1,5 @@
-from app.models.planning import CapabilityDefinition
 from app.services.agents import agent_registry
-from app.services.capabilities import capability_registry
+from app.services.capabilities import CapabilityDefinition, capability_registry
 from app.services.llm import llm_client
 from app.services.planner import Planner
 
