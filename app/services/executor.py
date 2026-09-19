@@ -7,6 +7,7 @@ from app.services.capabilities import capability_registry
 from app.services.events import event_bus
 from app.services.missions import mission_store
 from app.services.permissions import permission_policy
+from app.services.queue import task_queue
 from app.services.tasks import task_store
 from app.services.verification import verifier
 
@@ -73,9 +74,22 @@ class TaskExecutor:
                 "verified": True,
             }
             mission_store.update(mission)
-        else:
-            mission.status = MissionStatus.RUNNING
-            mission_store.update(mission)
+            return
+
+        mission.status = MissionStatus.RUNNING
+        mission_store.update(mission)
+
+        for ready_task in task_store.ready_for_mission(task.mission_id):
+            task_queue.put(ready_task)
+            event_bus.publish(
+                AiboEvent(
+                    type="task.ready",
+                    payload={
+                        "task_id": ready_task.id,
+                        "mission_id": ready_task.mission_id,
+                    },
+                )
+            )
 
     def _fail(self, task, error):
         task.error = error
