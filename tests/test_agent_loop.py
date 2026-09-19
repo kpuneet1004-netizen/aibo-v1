@@ -71,3 +71,9 @@ def test_task_readiness_follows_dependencies():
     task_store.save(first)
     ready = task_store.ready_for_mission(mission_id)
     assert [task.id for task in ready] == [second.id]
+
+
+def test_stub_planner_selects_fetch_url_for_url_objective():
+    plan = llm_client.plan("Fetch https://example.com and inspect it")
+    assert plan["steps"][0]["capability"] == "fetch_url"
+    assert plan["steps"][0]["agent"] == "general"
