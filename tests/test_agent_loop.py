@@ -1,9 +1,14 @@
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 import pytest
 
 from app.main import app
+from app.models.planning import AgentPlan, PlanStep
+from app.models.task import MissionTask, TaskStatus
 from app.services.llm import llm_client
 from app.services.planner import Planner, PlannerError
+from app.services.tasks import task_store
 
 client = TestClient(app)
 
@@ -25,16 +30,7 @@ def test_planner_does_not_route_by_keyword():
 
 def test_planner_rejects_unknown_capability(monkeypatch):
     def fake_plan(objective, runtime_contract=None):
-        return {
-            "steps": [{
-                "id": "step-1",
-                "objective": objective,
-                "capability": "browser",
-                "agent": "general",
-                "payload": {},
-                "requires_approval": False,
-            }]
-        }
+        return {"steps": [{"id":"step-1","objective":objective,"capability":"browser","agent":"general","payload":{},"requires_approval":False}]}
 
     monkeypatch.setattr(llm_client, "plan", fake_plan)
     with pytest.raises(PlannerError, match="unsupported capability"):
@@ -42,17 +38,36 @@ def test_planner_rejects_unknown_capability(monkeypatch):
 
 def test_planner_rejects_unknown_agent_pair(monkeypatch):
     def fake_plan(objective, runtime_contract=None):
-        return {
-            "steps": [{
-                "id": "step-1",
-                "objective": objective,
-                "capability": "respond",
-                "agent": "design",
-                "payload": {},
-                "requires_approval": False,
-            }]
-        }
+        return {"steps": [{"id":"step-1","objective":objective,"capability":"respond","agent":"design","payload":{},"requires_approval":False}]}
 
     monkeypatch.setattr(llm_client, "plan", fake_plan)
     with pytest.raises(PlannerError, match="unsupported agent/capability pair"):
         Planner().plan("Respond to me")
+
+def test_planner_rejects_dependency_cycle(monkeypatch):
+    def fake_plan(objective, runtime_contract=None):
+        return {
+            "steps": [
+                {"id":"a","objective":"a","capability":"respond","agent":"general","payload":{},"requires_approval":False,"depends_on":["b"]},
+                {"id":"b","objective":"b","capability":"respond","agent":"general","payload":{},"requires_approval":False,"depends_on":["a"]},
+            ]
+        }
+
+    monkeypatch.setattr(llm_client, "plan", fake_plan)
+    with pytest.raises(PlannerError, match="cyclic"):
+        Planner().plan("Do two dependent things")
+
+def test_task_readiness_follows_dependencies():
+    mission_id = str(uuid4())
+    first = MissionTask(id=str(uuid4()), mission_id=mission_id, agent="general", action="respond", payload={})
+    second = MissionTask(id=str(uuid4()), mission_id=mission_id, agent="general", action="respond", payload={"_depends_on":[first.id]})
+    task_store.save(first)
+    task_store.save(second)
+
+    ready = task_store.ready_for_mission(mission_id)
+    assert [task.id for task in ready] == [first.id]
+
+    first.status = TaskStatus.COMPLETED
+    task_store.save(first)
+    ready = task_store.ready_for_mission(mission_id)
+    assert [task.id for task in ready] == [second.id]
