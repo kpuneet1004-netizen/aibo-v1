@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+import socket
 
 from app.models.mission import MissionStatus
 from app.models.task import MissionTask, TaskStatus
@@ -28,6 +29,7 @@ def test_executor_verifies_and_completes_mission():
     assert mission_store.get(mission.id).status == MissionStatus.COMPLETED
 
 def test_fetch_url_returns_verified_http_result(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))])
     class FakeResponse:
         url = "https://example.com"
         status_code = 200
@@ -48,6 +50,7 @@ def test_fetch_url_rejects_private_hosts():
         fetch_url({"url": "http://127.0.0.1:8000"})
 
 def test_executor_runs_real_fetch_capability(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))])
     class FakeResponse:
         url = "https://example.com"
         status_code = 200
@@ -72,3 +75,13 @@ def test_executor_runs_real_fetch_capability(monkeypatch):
     assert result.status == TaskStatus.COMPLETED
     assert result.result["output"]["status_code"] == 200
     assert result.result["verification"]["verified"] is True
+
+
+def test_fetch_url_rejects_hostname_resolving_to_private_ip(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 80))],
+    )
+    with pytest.raises(ValueError, match="hostname resolves to a private or local IP"):
+        fetch_url({"url": "http://example.com"})
