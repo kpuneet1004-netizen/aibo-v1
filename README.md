@@ -24,6 +24,7 @@ The LLM proposes intent and sequencing. The runtime owns state, permissions, exe
 The deterministic test runtime currently exposes:
 - `respond`: generate an Aibo response through the configured LLM provider.
 - `execute`: compatibility alias for `respond`.
+- `fetch_url`: fetch a public HTTP(S) URL with response-size limits and DNS/IP safety checks.
 
 External integrations are intentionally not faked. New capabilities should be added only when their real execution and verification path exists.
 
@@ -49,6 +50,8 @@ Inspect a mission:
 curl http://localhost:8000/v1/missions/<mission_id>
 ```
 
+When `APP_ENV=production`, all `/v1` endpoints require the `X-Aibo-API-Key` header. Keep `AIBO_API_KEY` secret and never commit it.
+
 Approve a mission waiting for authorization:
 
 ```bash
@@ -73,7 +76,7 @@ Copy `.env.example` to `.env` and configure the provider when using a real OpenA
 
 ## Persistence and recovery
 
-SQLite stores missions, plans, tasks, and events under the configured data directory. On worker startup, queued/running tasks are recovered, but only tasks whose prerequisites are already completed are re-enqueued.
+SQLite stores missions, plans, tasks, and events under the configured data directory. The current single-process worker re-enqueues persisted queued tasks whose prerequisites are already completed. Orphaned `RUNNING` task recovery is a separate reliability fix being prepared before the phone-facing runtime is considered production-ready.
 
 ## Security boundary
 
