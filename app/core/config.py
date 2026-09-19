@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-5.6-mini"
     api_key: str = ""
+    session_ttl_seconds: int = 86400
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()
