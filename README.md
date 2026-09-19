@@ -102,3 +102,21 @@ The SQLite database is stored in the named `aibo-data` volume, so container repl
 The API is authenticated in production. For phone access over the internet, place the container behind an HTTPS reverse proxy or managed TLS endpoint; do not expose the raw HTTP port directly to the public internet. The `/health` endpoint is unauthenticated for infrastructure health checks, while `/v1/*` requires `X-Aibo-API-Key`.
 
 The V1 runtime remains a single-process worker by design. Horizontal scaling and distributed queues are out of scope for Alpha.
+
+
+### Phone session authentication
+
+The phone client should not send the long-lived API key on every request. Exchange it once over HTTPS:
+
+```bash
+curl -X POST https://<aibo-host>/v1/session \
+  -H "X-Aibo-API-Key: <AIBO_API_KEY>"
+```
+
+The response contains a short-lived bearer token. Store that token in the phone's secure credential storage and send it as:
+
+```
+Authorization: Bearer <token>
+```
+
+The token is signed by the server's API key and expires according to `SESSION_TTL_SECONDS`. A future pairing flow can replace the initial API-key exchange without changing the bearer-authenticated API surface.
