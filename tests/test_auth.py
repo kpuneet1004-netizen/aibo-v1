@@ -1,9 +1,17 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.core.config import settings
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clear_session_cookie():
+    client.cookies.clear()
+    yield
+    client.cookies.clear()
 
 
 def test_session_exchange_sets_httponly_cookie_and_bearer_auth(monkeypatch):
