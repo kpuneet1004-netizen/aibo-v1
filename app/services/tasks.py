@@ -1,5 +1,5 @@
 import json
-from app.models.task import MissionTask
+from app.models.task import MissionTask, TaskStatus
 from app.services.storage import storage
 
 class TaskStore:
@@ -43,6 +43,22 @@ class TaskStore:
                 "SELECT * FROM tasks WHERE status IN('queued','running') ORDER BY rowid"
             )
         ]
+
+    def ready_for_mission(self, mission_id):
+        tasks = self.for_mission(mission_id)
+        by_id = {task.id: task for task in tasks}
+        ready = []
+        for task in tasks:
+            if task.status != TaskStatus.QUEUED:
+                continue
+            dependencies = task.payload.get("_depends_on", [])
+            if all(
+                by_id.get(dependency) is not None
+                and by_id[dependency].status == TaskStatus.COMPLETED
+                for dependency in dependencies
+            ):
+                ready.append(task)
+        return ready
 
     def _from(self, row):
         return MissionTask(
