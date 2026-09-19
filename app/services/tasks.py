@@ -3,14 +3,59 @@ from app.models.task import MissionTask
 from app.services.storage import storage
 
 class TaskStore:
-    def save(self,t):
-        storage.write("INSERT OR REPLACE INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)",(t.id,t.mission_id,t.agent,t.action,json.dumps(t.payload),t.status.value,t.attempts,t.max_retries,json.dumps(t.result) if t.result is not None else None,t.error));return t
-    def get(self,task_id):
-        rows=storage.execute("SELECT * FROM tasks WHERE id=?",(task_id,))
-        if not rows:return None
-        r=rows[0];return self._from(r)
+    def save(self, task):
+        storage.write(
+            "INSERT OR REPLACE INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                task.id,
+                task.mission_id,
+                task.agent,
+                task.action,
+                json.dumps(task.payload),
+                task.status.value,
+                task.attempts,
+                task.max_retries,
+                json.dumps(task.result) if task.result is not None else None,
+                task.error,
+            ),
+        )
+        return task
+
+    def get(self, task_id):
+        rows = storage.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        if not rows:
+            return None
+        return self._from(rows[0])
+
+    def for_mission(self, mission_id):
+        return [
+            self._from(row)
+            for row in storage.execute(
+                "SELECT * FROM tasks WHERE mission_id=? ORDER BY rowid",
+                (mission_id,),
+            )
+        ]
+
     def pending(self):
-        return [self._from(r) for r in storage.execute("SELECT * FROM tasks WHERE status IN('queued','running') ORDER BY rowid")]
-    def _from(self,r):
-        return MissionTask(id=r["id"],mission_id=r["mission_id"],agent=r["agent"],action=r["action"],payload=json.loads(r["payload"]),status=r["status"],attempts=r["attempts"],max_retries=r["max_retries"],result=json.loads(r["result"]) if r["result"] else None,error=r["error"])
-task_store=TaskStore()
+        return [
+            self._from(row)
+            for row in storage.execute(
+                "SELECT * FROM tasks WHERE status IN('queued','running') ORDER BY rowid"
+            )
+        ]
+
+    def _from(self, row):
+        return MissionTask(
+            id=row["id"],
+            mission_id=row["mission_id"],
+            agent=row["agent"],
+            action=row["action"],
+            payload=json.loads(row["payload"]),
+            status=row["status"],
+            attempts=row["attempts"],
+            max_retries=row["max_retries"],
+            result=json.loads(row["result"]) if row["result"] else None,
+            error=row["error"],
+        )
+
+task_store = TaskStore()
