@@ -6,7 +6,7 @@ import socket
 
 from app.models.mission import MissionStatus
 from app.models.task import MissionTask, TaskStatus
-from app.services.capabilities import fetch_url
+from app.services.capabilities import CapabilityDefinition, capability_registry, fetch_url
 from app.services.executor import task_executor
 from app.services.missions import mission_store
 from app.services.tasks import task_store
@@ -107,7 +107,6 @@ def test_worker_recovers_orphaned_running_task():
 
 def test_worker_survives_unhandled_executor_exception(monkeypatch):
     from app.services.worker import Worker
-    from app.services.executor import task_executor
     import time
     mission = mission_store.create("Worker survives exception")
     task = MissionTask(id=str(uuid4()), mission_id=mission.id, agent="general",
@@ -140,3 +139,37 @@ def test_worker_survives_unhandled_executor_exception(monkeypatch):
     assert task_store.get(task.id).attempts == 2
     worker.stop()
     assert worker.running is False
+
+
+def test_executor_pauses_for_approval_instead_of_retrying(monkeypatch):
+    called = {"count": 0}
+
+    def should_not_execute(payload):
+        called["count"] += 1
+        return {"ok": True}
+
+    capability_registry.register(CapabilityDefinition(
+        "test_external_write",
+        "Test approval-gated external write.",
+        "external_write",
+        False,
+        should_not_execute,
+    ))
+    mission = mission_store.create("Approval-gated action")
+    task = MissionTask(
+        id=str(uuid4()),
+        mission_id=mission.id,
+        agent="general",
+        action="test_external_write",
+        payload={},
+        max_retries=3,
+    )
+    task_store.save(task)
+
+    result = task_executor.execute(task)
+
+    assert result.status == TaskStatus.QUEUED
+    assert result.attempts == 1
+    assert result.approval_granted is False
+    assert called["count"] == 0
+    assert mission_store.get(mission.id).status == MissionStatus.WAITING_APPROVAL
