@@ -106,6 +106,31 @@ def test_worker_recovers_orphaned_running_task():
     assert task_store.get(task.id).status == TaskStatus.COMPLETED
 
 
+def test_worker_marks_exhausted_orphaned_task_failed():
+    from app.services.worker import Worker
+    mission = mission_store.create("Do not retry exhausted task")
+    task = MissionTask(
+        id=str(uuid4()),
+        mission_id=mission.id,
+        agent="general",
+        action="respond",
+        payload={"objective": "Do not retry exhausted task"},
+        status=TaskStatus.RUNNING,
+        attempts=1,
+        max_retries=0,
+    )
+    task_store.save(task)
+
+    worker = Worker()
+    worker.start()
+    worker.stop()
+
+    recovered = task_store.get(task.id)
+    assert recovered.status == TaskStatus.FAILED
+    assert recovered.attempts == 1
+    assert mission_store.get(mission.id).status == MissionStatus.FAILED
+
+
 def test_worker_survives_unhandled_executor_exception(monkeypatch):
     from app.services.worker import Worker
     import time
