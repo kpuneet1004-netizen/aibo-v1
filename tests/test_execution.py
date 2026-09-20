@@ -206,7 +206,6 @@ def test_worker_does_not_retry_approval_wait(monkeypatch):
 
     worker = Worker()
     worker.start()
-    worker.enqueue(task)
     deadline = time.time() + 3
     while time.time() < deadline:
         current = task_store.get(task.id)
