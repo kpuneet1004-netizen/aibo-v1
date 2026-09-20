@@ -88,6 +88,6 @@ def test_executor_enforces_definition_approval(monkeypatch):
 
     result = task_executor.execute(task)
 
-    assert result.status == TaskStatus.FAILED
+    assert result.status == TaskStatus.WAITING_APPROVAL
     assert "requires user approval" in result.error
-    assert mission_store.get(mission.id).status == MissionStatus.FAILED
+    assert mission_store.get(mission.id).status == MissionStatus.WAITING_APPROVAL
