@@ -1,9 +1,11 @@
 from threading import Event, Thread
 from uuid import uuid4
 from app.models.event import AiboEvent
+from app.models.mission import MissionStatus
 from app.models.task import MissionTask, TaskStatus
 from app.services.events import event_bus
 from app.services.executor import task_executor
+from app.services.missions import mission_store
 from app.services.queue import task_queue
 from app.services.tasks import task_store
 
@@ -19,7 +21,19 @@ class Worker:
             return
         self._stop.clear()
         for task in task_store.pending():
-            if task.status == TaskStatus.RUNNING:
+            if task.status != TaskStatus.RUNNING:
+                continue
+            if task.attempts > task.max_retries:
+                task.status = TaskStatus.FAILED
+                task.error = "Task exhausted its retry budget before worker recovery"
+                task_store.save(task)
+                mission = mission_store.get(task.mission_id)
+                if mission:
+                    mission.status = MissionStatus.FAILED
+                    mission.error = task.error
+                    mission.attempts = task.attempts
+                    mission_store.update(mission)
+            else:
                 task.status = TaskStatus.QUEUED
                 task_store.save(task)
         missions = {task.mission_id for task in task_store.pending()}
