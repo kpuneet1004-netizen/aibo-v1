@@ -10,6 +10,9 @@ class MissionTask(BaseModel):
     agent: str
     action: str
     payload: dict = Field(default_factory=dict)
+    depends_on: list[str] = Field(default_factory=list)
+    requires_approval: bool = False
+    approval_granted: bool = False
     status: TaskStatus = TaskStatus.QUEUED
     attempts: int = 0
     max_retries: int = Field(default=3, ge=0)
