@@ -23,7 +23,7 @@ class TaskExecutor:
 
         permission = permission_policy.evaluate(
             definition=definition,
-            approval_granted=bool(task.payload.get("_approval_granted", False)),
+            approval_granted=task.approval_granted,
         )
         if not permission.allowed:
             return self._fail(task, permission.reason or "Permission required")
@@ -35,7 +35,6 @@ class TaskExecutor:
             return self._fail(task, f"Capability '{task.action}' unavailable for agent '{task.agent}'")
 
         handler = definition.handler
-
         try:
             output = handler(task.payload)
             verification = verifier.verify(output)
@@ -47,17 +46,10 @@ class TaskExecutor:
             }
             task.status = TaskStatus.COMPLETED
             task_store.save(task)
-            event_bus.publish(
-                AiboEvent(
-                    type="task.completed",
-                    payload={
-                        "task_id": task.id,
-                        "mission_id": task.mission_id,
-                        "agent": agent.name,
-                        "action": task.action,
-                    },
-                )
-            )
+            event_bus.publish(AiboEvent(
+                type="task.completed",
+                payload={"task_id": task.id, "mission_id": task.mission_id, "agent": agent.name, "action": task.action},
+            ))
             self._update_mission_after_task(task)
             return task
         except Exception as exc:
@@ -71,56 +63,35 @@ class TaskExecutor:
         if tasks and all(item.status == TaskStatus.COMPLETED for item in tasks):
             mission.status = MissionStatus.COMPLETED
             mission.attempts = sum(item.attempts for item in tasks)
-            mission.result = {
-                "steps": [item.result for item in tasks],
-                "verified": True,
-            }
+            mission.result = {"steps": [item.result for item in tasks], "verified": True}
             mission_store.update(mission)
             return
 
         mission.status = MissionStatus.RUNNING
         mission_store.update(mission)
-
         for ready_task in task_store.ready_for_mission(task.mission_id):
             task_queue.put(ready_task)
-            event_bus.publish(
-                AiboEvent(
-                    type="task.ready",
-                    payload={
-                        "task_id": ready_task.id,
-                        "mission_id": ready_task.mission_id,
-                    },
-                )
-            )
+            event_bus.publish(AiboEvent(
+                type="task.ready",
+                payload={"task_id": ready_task.id, "mission_id": ready_task.mission_id},
+            ))
 
     def _fail(self, task, error):
         task.error = error
         if task.attempts <= task.max_retries:
             task.status = TaskStatus.QUEUED
             task_store.save(task)
-            event_bus.publish(
-                AiboEvent(
-                    type="task.retry",
-                    payload={
-                        "task_id": task.id,
-                        "attempt": task.attempts,
-                        "error": error,
-                    },
-                )
-            )
+            event_bus.publish(AiboEvent(
+                type="task.retry",
+                payload={"task_id": task.id, "attempt": task.attempts, "error": error},
+            ))
         else:
             task.status = TaskStatus.FAILED
             task_store.save(task)
-            event_bus.publish(
-                AiboEvent(
-                    type="task.failed",
-                    payload={
-                        "task_id": task.id,
-                        "mission_id": task.mission_id,
-                        "error": error,
-                    },
-                )
-            )
+            event_bus.publish(AiboEvent(
+                type="task.failed",
+                payload={"task_id": task.id, "mission_id": task.mission_id, "error": error},
+            ))
             mission = mission_store.get(task.mission_id)
             if mission:
                 mission.status = MissionStatus.FAILED
