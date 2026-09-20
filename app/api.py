@@ -147,8 +147,9 @@ def approve_mission(mission_id: str):
 
     tasks = task_store.for_mission(mission_id)
     for task in tasks:
-        if task.status == TaskStatus.QUEUED and task.requires_approval:
+        if task.status in {TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL} and task.requires_approval:
             task.approval_granted = True
+            task.status = TaskStatus.QUEUED
             task_store.save(task)
 
     for task in tasks:
