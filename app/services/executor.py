@@ -79,7 +79,7 @@ class TaskExecutor:
             ))
 
     def _wait_for_approval(self, task, error):
-        task.status = TaskStatus.QUEUED
+        task.status = TaskStatus.WAITING_APPROVAL
         task.error = error
         task_store.save(task)
         mission = mission_store.get(task.mission_id)
