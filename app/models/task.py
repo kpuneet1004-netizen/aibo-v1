@@ -2,7 +2,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 class TaskStatus(StrEnum):
-    QUEUED="queued"; RUNNING="running"; COMPLETED="completed"; FAILED="failed"
+    QUEUED="queued"; WAITING_APPROVAL="waiting_approval"; RUNNING="running"; COMPLETED="completed"; FAILED="failed"
 
 class MissionTask(BaseModel):
     id: str
