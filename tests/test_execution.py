@@ -9,6 +9,7 @@ from app.models.task import MissionTask, TaskStatus
 from app.services.capabilities import CapabilityDefinition, capability_registry, fetch_url
 from app.services.executor import task_executor
 from app.services.missions import mission_store
+from app.services.queue import task_queue
 from app.services.tasks import task_store
 
 def test_executor_verifies_and_completes_mission():
@@ -168,8 +169,55 @@ def test_executor_pauses_for_approval_instead_of_retrying(monkeypatch):
 
     result = task_executor.execute(task)
 
-    assert result.status == TaskStatus.QUEUED
+    assert result.status == TaskStatus.WAITING_APPROVAL
     assert result.attempts == 1
     assert result.approval_granted is False
     assert called["count"] == 0
     assert mission_store.get(mission.id).status == MissionStatus.WAITING_APPROVAL
+
+
+def test_worker_does_not_retry_approval_wait(monkeypatch):
+    from app.services.worker import Worker
+    import time
+
+    called = {"count": 0}
+
+    def should_not_execute(payload):
+        called["count"] += 1
+        return {"ok": True}
+
+    capability_registry.register(CapabilityDefinition(
+        "test_external_write_worker",
+        "Test worker approval pause.",
+        "external_write",
+        False,
+        should_not_execute,
+    ))
+    mission = mission_store.create("Worker approval pause")
+    task = MissionTask(
+        id=str(uuid4()),
+        mission_id=mission.id,
+        agent="general",
+        action="test_external_write_worker",
+        payload={},
+        max_retries=3,
+    )
+    task_store.save(task)
+
+    worker = Worker()
+    worker.start()
+    worker.enqueue(task)
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        current = task_store.get(task.id)
+        if current and current.status == TaskStatus.WAITING_APPROVAL:
+            break
+        time.sleep(0.05)
+
+    time.sleep(0.2)
+    current = task_store.get(task.id)
+    assert current.status == TaskStatus.WAITING_APPROVAL
+    assert current.attempts == 1
+    assert called["count"] == 0
+    assert task_queue.size() == 0
+    worker.stop()
