@@ -26,7 +26,9 @@ class TaskExecutor:
             approval_granted=task.approval_granted,
         )
         if not permission.allowed:
-            return self._fail(task, permission.reason or "Permission required")
+            if permission.requires_approval:
+                return self._wait_for_approval(task, permission.reason or "Permission required")
+            return self._fail(task, permission.reason or "Permission denied")
 
         agent: AgentDefinition | None = agent_registry.get(task.agent)
         if agent is None or not agent.enabled:
@@ -75,6 +77,20 @@ class TaskExecutor:
                 type="task.ready",
                 payload={"task_id": ready_task.id, "mission_id": ready_task.mission_id},
             ))
+
+    def _wait_for_approval(self, task, error):
+        task.status = TaskStatus.QUEUED
+        task.error = error
+        task_store.save(task)
+        mission = mission_store.get(task.mission_id)
+        if mission:
+            mission.status = MissionStatus.WAITING_APPROVAL
+            mission_store.update(mission)
+        event_bus.publish(AiboEvent(
+            type="task.waiting_approval",
+            payload={"task_id": task.id, "mission_id": task.mission_id, "reason": error},
+        ))
+        return task
 
     def _fail(self, task, error):
         task.error = error
