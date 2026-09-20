@@ -89,11 +89,7 @@ def create_session(response: Response):
         samesite="strict",
         path="/",
     )
-    return {
-        "token": token,
-        "token_type": "Bearer",
-        "expires_at": expires_at,
-    }
+    return {"token": token, "token_type": "Bearer", "expires_at": expires_at}
 
 
 @router.post("/missions", dependencies=[Depends(require_api_key)])
@@ -105,50 +101,35 @@ def create_mission(request: MissionCreate):
     try:
         plan = planner.plan(request.objective)
         mission.plan = [step.model_dump() for step in plan.steps]
-
         step_task_ids = {step.id: str(uuid4()) for step in plan.steps}
         tasks = []
         for step in plan.steps:
-            payload = {
-                **step.payload,
-                "_requires_approval": step.requires_approval,
-                "_depends_on": [step_task_ids[dependency] for dependency in step.depends_on],
-            }
             task = MissionTask(
                 id=step_task_ids[step.id],
                 mission_id=mission.id,
                 agent=step.agent,
                 action=step.capability,
-                payload=payload,
+                payload=dict(step.payload),
+                depends_on=[step_task_ids[dependency] for dependency in step.depends_on],
+                requires_approval=step.requires_approval,
                 max_retries=request.max_retries,
             )
             task_store.save(task)
             tasks.append(task)
 
-        needs_approval = any(step.requires_approval for step in plan.steps)
+        needs_approval = any(task.requires_approval for task in tasks)
         mission.status = MissionStatus.WAITING_APPROVAL if needs_approval else MissionStatus.RUNNING
         mission_store.update(mission)
-
         if not needs_approval:
             for task in tasks:
-                if not task.payload.get("_depends_on"):
+                if not task.depends_on:
                     worker.enqueue(task)
 
-        event_bus.publish(
-            AiboEvent(
-                type="mission.created",
-                payload={
-                    "mission_id": mission.id,
-                    "task_ids": [task.id for task in tasks],
-                    "status": mission.status.value,
-                },
-            )
-        )
-        return {
-            "mission": mission,
-            "tasks": tasks,
-            "task": tasks[0],
-        }
+        event_bus.publish(AiboEvent(
+            type="mission.created",
+            payload={"mission_id": mission.id, "task_ids": [task.id for task in tasks], "status": mission.status.value},
+        ))
+        return {"mission": mission, "tasks": tasks, "task": tasks[0]}
     except Exception as exc:
         mission.status = MissionStatus.FAILED
         mission.error = str(exc)
@@ -166,20 +147,17 @@ def approve_mission(mission_id: str):
 
     tasks = task_store.for_mission(mission_id)
     for task in tasks:
-        if task.status == TaskStatus.QUEUED:
-            task.payload.pop("_requires_approval", None)
-            task.payload["_approval_granted"] = True
+        if task.status == TaskStatus.QUEUED and task.requires_approval:
+            task.approval_granted = True
             task_store.save(task)
 
     for task in tasks:
-        if task.status == TaskStatus.QUEUED and not task.payload.get("_depends_on"):
+        if task.status == TaskStatus.QUEUED and not task.depends_on:
             worker.enqueue(task)
 
     mission.status = MissionStatus.RUNNING
     mission_store.update(mission)
-    event_bus.publish(
-        AiboEvent(type="mission.approved", payload={"mission_id": mission_id})
-    )
+    event_bus.publish(AiboEvent(type="mission.approved", payload={"mission_id": mission_id}))
     return {"mission": mission, "tasks": tasks}
 
 
@@ -206,8 +184,4 @@ def recent_events(limit: int = 50):
 
 @router.get("/worker", dependencies=[Depends(require_api_key)])
 def worker_status():
-    return {
-        "worker_id": worker.worker_id,
-        "running": worker.running,
-        "queue_size": task_queue.size(),
-    }
+    return {"worker_id": worker.worker_id, "running": worker.running, "queue_size": task_queue.size()}
