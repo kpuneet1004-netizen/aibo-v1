@@ -5,7 +5,7 @@ from app.services.storage import storage
 class TaskStore:
     def save(self, task):
         storage.write(
-            "INSERT OR REPLACE INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 task.id,
                 task.mission_id,
@@ -17,6 +17,9 @@ class TaskStore:
                 task.max_retries,
                 json.dumps(task.result) if task.result is not None else None,
                 task.error,
+                json.dumps(task.depends_on),
+                int(task.requires_approval),
+                int(task.approval_granted),
             ),
         )
         return task
@@ -51,22 +54,25 @@ class TaskStore:
         for task in tasks:
             if task.status != TaskStatus.QUEUED:
                 continue
-            dependencies = task.payload.get("_depends_on", [])
             if all(
                 by_id.get(dependency) is not None
                 and by_id[dependency].status == TaskStatus.COMPLETED
-                for dependency in dependencies
+                for dependency in task.depends_on
             ):
                 ready.append(task)
         return ready
 
     def _from(self, row):
+        keys = row.keys()
         return MissionTask(
             id=row["id"],
             mission_id=row["mission_id"],
             agent=row["agent"],
             action=row["action"],
             payload=json.loads(row["payload"]),
+            depends_on=json.loads(row["depends_on"]) if "depends_on" in keys else [],
+            requires_approval=bool(row["requires_approval"]) if "requires_approval" in keys else False,
+            approval_granted=bool(row["approval_granted"]) if "approval_granted" in keys else False,
             status=row["status"],
             attempts=row["attempts"],
             max_retries=row["max_retries"],
