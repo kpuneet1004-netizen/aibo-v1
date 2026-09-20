@@ -21,17 +21,22 @@ from app.services.storage import storage
 router = APIRouter(prefix="/v1")
 
 
+def _session_signing_key() -> bytes:
+    # Domain-separate session signing from the bootstrap/API credential.
+    return hmac.new(settings.api_key.encode(), b"aibo-session-v1", hashlib.sha256).digest()
+
+
 def _encode_session(expiry: int) -> str:
     payload = {"exp": expiry, "nonce": secrets.token_urlsafe(12)}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
-    signature = hmac.new(settings.api_key.encode(), body.encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(_session_signing_key(), body.encode(), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
 
 
 def _decode_session(token: str) -> dict | None:
     try:
         body, signature = token.split(".", 1)
-        expected = hmac.new(settings.api_key.encode(), body.encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(_session_signing_key(), body.encode(), hashlib.sha256).hexdigest()
         if not secrets.compare_digest(signature, expected):
             return None
         padded = body + "=" * (-len(body) % 4)
