@@ -12,6 +12,7 @@ from app.models.mission import MissionCreate, MissionStatus
 from app.models.task import MissionTask, TaskStatus
 from app.services.events import event_bus
 from app.services.missions import mission_store
+from app.services.planner import planner
 from app.services.queue import task_queue
 from app.services.tasks import task_store
 from app.services.worker import worker
@@ -56,9 +57,7 @@ def _configured_api_key() -> None:
         raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
 
 
-def require_bootstrap_key(
-    x_aibo_api_key: str | None = Header(default=None),
-) -> None:
+def require_bootstrap_key(x_aibo_api_key: str | None = Header(default=None)) -> None:
     _configured_api_key()
     if not settings.api_key:
         return
@@ -99,27 +98,14 @@ def _session_from_request(authorization: str | None, aibo_session: str | None) -
 def create_session(response: Response):
     expires_at = int(time.time()) + settings.session_ttl_seconds
     token = _encode_session(expires_at)
-    response.set_cookie(
-        key="aibo_session",
-        value=token,
-        max_age=settings.session_ttl_seconds,
-        httponly=True,
-        secure=settings.app_env.lower() == "production",
-        samesite="strict",
-        path="/",
-    )
+    response.set_cookie(key="aibo_session", value=token, max_age=settings.session_ttl_seconds, httponly=True, secure=settings.app_env.lower() == "production", samesite="strict", path="/")
     return {"token": token, "token_type": "Bearer", "expires_at": expires_at}
 
 
 @router.post("/session/revoke", dependencies=[Depends(require_api_key)])
-def revoke_session(
-    response: Response,
-    authorization: str | None = Header(default=None),
-    aibo_session: str | None = Cookie(default=None),
-):
+def revoke_session(response: Response, authorization: str | None = Header(default=None), aibo_session: str | None = Cookie(default=None)):
     _, payload = _session_from_request(authorization, aibo_session)
-    now = int(time.time())
-    storage.revoke_session(str(payload["nonce"]), int(payload["exp"]), now)
+    storage.revoke_session(str(payload["nonce"]), int(payload["exp"]), int(time.time()))
     response.delete_cookie("aibo_session", path="/")
     return {"revoked": True}
 
@@ -129,26 +115,15 @@ def create_mission(request: MissionCreate):
     mission = mission_store.create(request.objective, request.max_retries)
     mission.status = MissionStatus.PLANNING
     mission_store.update(mission)
-
     try:
         plan = planner.plan(request.objective)
         mission.plan = [step.model_dump() for step in plan.steps]
         step_task_ids = {step.id: str(uuid4()) for step in plan.steps}
         tasks = []
         for step in plan.steps:
-            task = MissionTask(
-                id=step_task_ids[step.id],
-                mission_id=mission.id,
-                agent=step.agent,
-                action=step.capability,
-                payload=dict(step.payload),
-                depends_on=[step_task_ids[dependency] for dependency in step.depends_on],
-                requires_approval=step.requires_approval,
-                max_retries=request.max_retries,
-            )
+            task = MissionTask(id=step_task_ids[step.id], mission_id=mission.id, agent=step.agent, action=step.capability, payload=dict(step.payload), depends_on=[step_task_ids[dependency] for dependency in step.depends_on], requires_approval=step.requires_approval, max_retries=request.max_retries)
             task_store.save(task)
             tasks.append(task)
-
         needs_approval = any(task.requires_approval for task in tasks)
         mission.status = MissionStatus.WAITING_APPROVAL if needs_approval else MissionStatus.RUNNING
         mission_store.update(mission)
@@ -156,11 +131,7 @@ def create_mission(request: MissionCreate):
             for task in tasks:
                 if not task.depends_on:
                     worker.enqueue(task)
-
-        event_bus.publish(AiboEvent(
-            type="mission.created",
-            payload={"mission_id": mission.id, "task_ids": [task.id for task in tasks], "status": mission.status.value},
-        ))
+        event_bus.publish(AiboEvent(type="mission.created", payload={"mission_id": mission.id, "task_ids": [task.id for task in tasks], "status": mission.status.value}))
         return {"mission": mission, "tasks": tasks, "task": tasks[0]}
     except Exception as exc:
         mission.status = MissionStatus.FAILED
@@ -176,18 +147,15 @@ def approve_mission(mission_id: str):
         raise HTTPException(status_code=404, detail="Mission not found")
     if mission.status != MissionStatus.WAITING_APPROVAL:
         raise HTTPException(status_code=409, detail="Mission is not waiting for approval")
-
     tasks = task_store.for_mission(mission_id)
     for task in tasks:
         if task.status in {TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL} and task.requires_approval:
             task.approval_granted = True
             task.status = TaskStatus.QUEUED
             task_store.save(task)
-
     for task in tasks:
         if task.status == TaskStatus.QUEUED and not task.depends_on:
             worker.enqueue(task)
-
     mission.status = MissionStatus.RUNNING
     mission_store.update(mission)
     event_bus.publish(AiboEvent(type="mission.approved", payload={"mission_id": mission_id}))
