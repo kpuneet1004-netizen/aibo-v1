@@ -12,10 +12,10 @@ from app.models.mission import MissionCreate, MissionStatus
 from app.models.task import MissionTask, TaskStatus
 from app.services.events import event_bus
 from app.services.missions import mission_store
-from app.services.planner import planner
 from app.services.queue import task_queue
 from app.services.tasks import task_store
 from app.services.worker import worker
+from app.services.storage import storage
 
 router = APIRouter(prefix="/v1")
 
@@ -27,17 +27,26 @@ def _encode_session(expiry: int) -> str:
     return f"{body}.{signature}"
 
 
-def _valid_session(token: str) -> bool:
+def _decode_session(token: str) -> dict | None:
     try:
         body, signature = token.split(".", 1)
         expected = hmac.new(settings.api_key.encode(), body.encode(), hashlib.sha256).hexdigest()
         if not secrets.compare_digest(signature, expected):
-            return False
+            return None
         padded = body + "=" * (-len(body) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded))
-        return int(payload["exp"]) > int(time.time())
+        if int(payload["exp"]) <= int(time.time()):
+            return None
+        nonce = str(payload["nonce"])
+        if not nonce or storage.is_session_revoked(nonce):
+            return None
+        return payload
     except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
-        return False
+        return None
+
+
+def _valid_session(token: str) -> bool:
+    return _decode_session(token) is not None
 
 
 def _configured_api_key() -> None:
@@ -76,6 +85,16 @@ def require_api_key(
     raise HTTPException(status_code=401, detail="Invalid Aibo API credentials")
 
 
+def _session_from_request(authorization: str | None, aibo_session: str | None) -> tuple[str, dict]:
+    token = authorization[7:].strip() if authorization and authorization.startswith("Bearer ") else aibo_session
+    if not token:
+        raise HTTPException(status_code=400, detail="Aibo session token required")
+    payload = _decode_session(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid Aibo session")
+    return token, payload
+
+
 @router.post("/session", dependencies=[Depends(require_bootstrap_key)])
 def create_session(response: Response):
     expires_at = int(time.time()) + settings.session_ttl_seconds
@@ -90,6 +109,19 @@ def create_session(response: Response):
         path="/",
     )
     return {"token": token, "token_type": "Bearer", "expires_at": expires_at}
+
+
+@router.post("/session/revoke", dependencies=[Depends(require_api_key)])
+def revoke_session(
+    response: Response,
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+):
+    _, payload = _session_from_request(authorization, aibo_session)
+    now = int(time.time())
+    storage.revoke_session(str(payload["nonce"]), int(payload["exp"]), now)
+    response.delete_cookie("aibo_session", path="/")
+    return {"revoked": True}
 
 
 @router.post("/missions", dependencies=[Depends(require_api_key)])
