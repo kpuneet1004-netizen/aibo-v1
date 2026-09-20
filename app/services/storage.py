@@ -41,7 +41,10 @@ class Storage:
                     attempts INTEGER NOT NULL,
                     max_retries INTEGER NOT NULL,
                     result TEXT,
-                    error TEXT
+                    error TEXT,
+                    depends_on TEXT NOT NULL DEFAULT '[]',
+                    requires_approval INTEGER NOT NULL DEFAULT 0,
+                    approval_granted INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS events(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +56,14 @@ class Storage:
             columns = {row["name"] for row in c.execute("PRAGMA table_info(missions)")}
             if "plan" not in columns:
                 c.execute("ALTER TABLE missions ADD COLUMN plan TEXT")
-                c.commit()
+            task_columns = {row["name"] for row in c.execute("PRAGMA table_info(tasks)")}
+            if "depends_on" not in task_columns:
+                c.execute("ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'")
+            if "requires_approval" not in task_columns:
+                c.execute("ALTER TABLE tasks ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 0")
+            if "approval_granted" not in task_columns:
+                c.execute("ALTER TABLE tasks ADD COLUMN approval_granted INTEGER NOT NULL DEFAULT 0")
+            c.commit()
 
     def _connect_and_execute(self, sql, params=()):
         with self._connect() as c:
