@@ -58,6 +58,36 @@ def test_invalid_bearer_token_is_rejected(monkeypatch):
     assert response.status_code == 401
 
 
+def test_missing_api_key_fails_closed_in_production(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "api_key", "")
+
+    response = client.get("/v1/status")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Aibo API authentication is not configured"
+
+
+def test_missing_api_key_remains_permitted_in_test_environment(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "api_key", "")
+
+    response = client.get("/v1/status")
+
+    assert response.status_code == 200
+
+
+def test_production_session_cookie_is_secure(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "api_key", "test-secret")
+    monkeypatch.setattr(settings, "session_ttl_seconds", 300)
+
+    session = client.post("/v1/session", headers={"X-Aibo-API-Key": "test-secret"})
+
+    assert session.status_code == 200
+    assert "Secure" in session.headers["set-cookie"]
+
+
 def test_phone_client_is_available():
     response = client.get("/app")
     assert response.status_code == 200
