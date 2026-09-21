@@ -14,6 +14,7 @@ class MissionStatus(StrEnum):
 
 class Mission(BaseModel):
     id: str
+    owner_id: str = "default"
     objective: str = Field(min_length=1)
     status: MissionStatus = MissionStatus.PENDING
     attempts: int = 0
@@ -28,5 +29,5 @@ class MissionCreate(BaseModel):
     objective: str = Field(min_length=1)
     max_retries: int = Field(default=3, ge=0)
 
-def new_mission(objective: str, max_retries: int = 3) -> Mission:
-    return Mission(id=str(uuid4()), objective=objective, max_retries=max_retries)
+def new_mission(objective: str, max_retries: int = 3, owner_id: str = "default") -> Mission:
+    return Mission(id=str(uuid4()), owner_id=owner_id, objective=objective, max_retries=max_retries)
