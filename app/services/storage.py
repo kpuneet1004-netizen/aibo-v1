@@ -57,6 +57,13 @@ class Storage:
                     expires_at INTEGER NOT NULL,
                     revoked_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS memories(
+                    owner_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    mission_id TEXT,
+                    PRIMARY KEY(owner_id, key)
+                );
             """)
             columns = {row["name"] for row in c.execute("PRAGMA table_info(missions)")}
             if "plan" not in columns:
