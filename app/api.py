@@ -62,6 +62,18 @@ def _configured_api_key() -> None:
         raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
 
 
+def require_safe_startup() -> None:
+    """Fail closed at process startup outside explicitly local environments."""
+    if settings.api_key:
+        return
+    if settings.app_env.lower() in {"development", "test"}:
+        return
+    raise RuntimeError(
+        f"Refusing to start: APP_ENV={settings.app_env!r} but AIBO_API_KEY is not set. "
+        "Set AIBO_API_KEY, or set APP_ENV=development or APP_ENV=test if this is intentional for local use."
+    )
+
+
 def require_bootstrap_key(x_aibo_api_key: str | None = Header(default=None)) -> None:
     _configured_api_key()
     if not settings.api_key:
