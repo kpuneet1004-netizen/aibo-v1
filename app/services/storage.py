@@ -29,7 +29,8 @@ class Storage:
                     error TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    plan TEXT
+                    plan TEXT,
+                    owner_id TEXT NOT NULL DEFAULT 'default'
                 );
                 CREATE TABLE IF NOT EXISTS tasks(
                     id TEXT PRIMARY KEY,
@@ -68,6 +69,8 @@ class Storage:
             columns = {row["name"] for row in c.execute("PRAGMA table_info(missions)")}
             if "plan" not in columns:
                 c.execute("ALTER TABLE missions ADD COLUMN plan TEXT")
+            if "owner_id" not in columns:
+                c.execute("ALTER TABLE missions ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'default'")
             task_columns = {row["name"] for row in c.execute("PRAGMA table_info(tasks)")}
             if "depends_on" not in task_columns:
                 c.execute("ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'")
