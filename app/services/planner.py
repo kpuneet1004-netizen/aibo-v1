@@ -1,3 +1,4 @@
+import json
 from app.models.planning import AgentPlan, PlanStep
 from app.services.agents import agent_registry
 from app.services.capabilities import capability_registry
@@ -16,8 +17,11 @@ class Planner:
         ]
         return f"capabilities={capabilities}; agents={agents}"
 
-    def plan(self, objective: str) -> AgentPlan:
-        raw = llm_client.plan(objective, self._runtime_contract())
+    def plan(self, objective: str, memory_context: list[dict] | None = None) -> AgentPlan:
+        runtime_contract = self._runtime_contract()
+        if memory_context:
+            runtime_contract += f"; memory_context={json.dumps(memory_context, separators=(',', ':'))}"
+        raw = llm_client.plan(objective, runtime_contract)
         steps = []
         seen_ids = set()
         for item in raw["steps"]:
