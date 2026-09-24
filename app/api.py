@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.models.mission import MissionCreate, MissionStatus
 from app.models.task import MissionTask, TaskStatus
 from app.services.events import event_bus
+from app.services.memory import memory_store
 from app.services.missions import mission_store
 from app.services.planner import planner
 from app.services.queue import task_queue
@@ -21,13 +22,19 @@ from app.services.storage import storage
 router = APIRouter(prefix="/v1")
 
 
+def _owner_id_from_api_key(api_key: str | None) -> str:
+    if not api_key:
+        return "default"
+    return "api:" + hashlib.sha256(api_key.encode()).hexdigest()
+
+
 def _session_signing_key() -> bytes:
     # Domain-separate session signing from the bootstrap/API credential.
     return hmac.new(settings.api_key.encode(), b"aibo-session-v1", hashlib.sha256).digest()
 
 
-def _encode_session(expiry: int) -> str:
-    payload = {"exp": expiry, "nonce": secrets.token_urlsafe(12)}
+def _encode_session(expiry: int, owner_id: str) -> str:
+    payload = {"exp": expiry, "nonce": secrets.token_urlsafe(12), "owner_id": owner_id}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     signature = hmac.new(_session_signing_key(), body.encode(), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
@@ -44,7 +51,8 @@ def _decode_session(token: str) -> dict | None:
         if int(payload["exp"]) <= int(time.time()):
             return None
         nonce = str(payload["nonce"])
-        if not nonce or storage.is_session_revoked(nonce):
+        owner_id = str(payload["owner_id"])
+        if not nonce or not owner_id or storage.is_session_revoked(nonce):
             return None
         return payload
     except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
@@ -111,10 +119,27 @@ def _session_from_request(authorization: str | None, aibo_session: str | None) -
     return token, payload
 
 
+def _owner_from_request(
+    x_aibo_api_key: str | None,
+    authorization: str | None,
+    aibo_session: str | None,
+) -> str:
+    if authorization and authorization.startswith("Bearer ") or aibo_session:
+        _, payload = _session_from_request(authorization, aibo_session)
+        return str(payload["owner_id"])
+    return _owner_id_from_api_key(x_aibo_api_key if x_aibo_api_key else settings.api_key)
+
+
+def _require_mission_owner(mission, owner_id: str) -> None:
+    if mission.owner_id != owner_id:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+
 @router.post("/session", dependencies=[Depends(require_bootstrap_key)])
-def create_session(response: Response):
+def create_session(response: Response, x_aibo_api_key: str | None = Header(default=None)):
     expires_at = int(time.time()) + settings.session_ttl_seconds
-    token = _encode_session(expires_at)
+    owner_id = _owner_id_from_api_key(x_aibo_api_key if x_aibo_api_key else settings.api_key)
+    token = _encode_session(expires_at, owner_id)
     response.set_cookie(key="aibo_session", value=token, max_age=settings.session_ttl_seconds, httponly=True, secure=settings.app_env.lower() == "production", samesite="strict", path="/")
     return {"token": token, "token_type": "Bearer", "expires_at": expires_at}
 
@@ -128,12 +153,19 @@ def revoke_session(response: Response, authorization: str | None = Header(defaul
 
 
 @router.post("/missions", dependencies=[Depends(require_api_key)])
-def create_mission(request: MissionCreate):
-    mission = mission_store.create(request.objective, request.max_retries)
+def create_mission(
+    request: MissionCreate,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+):
+    owner_id = _owner_from_request(x_aibo_api_key, authorization, aibo_session)
+    mission = mission_store.create(request.objective, request.max_retries, owner_id=owner_id)
     mission.status = MissionStatus.PLANNING
     mission_store.update(mission)
     try:
-        plan = planner.plan(request.objective)
+        memory_context = memory_store.list(owner_id)
+        plan = planner.plan(request.objective, memory_context=memory_context)
         mission.plan = [step.model_dump() for step in plan.steps]
         step_task_ids = {step.id: str(uuid4()) for step in plan.steps}
         tasks = []
@@ -158,10 +190,17 @@ def create_mission(request: MissionCreate):
 
 
 @router.post("/missions/{mission_id}/approve", dependencies=[Depends(require_api_key)])
-def approve_mission(mission_id: str):
+def approve_mission(
+    mission_id: str,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+):
+    owner_id = _owner_from_request(x_aibo_api_key, authorization, aibo_session)
     mission = mission_store.get(mission_id)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
+    _require_mission_owner(mission, owner_id)
     if mission.status != MissionStatus.WAITING_APPROVAL:
         raise HTTPException(status_code=409, detail="Mission is not waiting for approval")
     tasks = task_store.for_mission(mission_id)
@@ -180,10 +219,17 @@ def approve_mission(mission_id: str):
 
 
 @router.get("/missions/{mission_id}", dependencies=[Depends(require_api_key)])
-def get_mission(mission_id: str):
+def get_mission(
+    mission_id: str,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+):
+    owner_id = _owner_from_request(x_aibo_api_key, authorization, aibo_session)
     mission = mission_store.get(mission_id)
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
+    _require_mission_owner(mission, owner_id)
     return mission
 
 
