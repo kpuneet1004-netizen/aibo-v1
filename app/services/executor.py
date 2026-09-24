@@ -5,6 +5,7 @@ from app.models.task import TaskStatus
 from app.services.agents import agent_registry
 from app.services.capabilities import capability_registry
 from app.services.events import event_bus
+from app.services.memory import memory_store
 from app.services.missions import mission_store
 from app.services.permissions import permission_policy
 from app.services.queue import task_queue
@@ -67,6 +68,12 @@ class TaskExecutor:
             mission.attempts = sum(item.attempts for item in tasks)
             mission.result = {"steps": [item.result for item in tasks], "verified": True}
             mission_store.update(mission)
+            memory_store.save(
+                mission.owner_id,
+                "last_completed_mission",
+                {"mission_id": mission.id, "objective": mission.objective, "result": mission.result},
+                mission.id,
+            )
             return
 
         mission.status = MissionStatus.RUNNING
