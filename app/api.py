@@ -33,7 +33,7 @@ def _session_signing_key() -> bytes:
     return hmac.new(settings.api_key.encode(), b"aibo-session-v1", hashlib.sha256).digest()
 
 
-def _encode_session(expiry: int, owner_id: str) -> str:
+def _encode_session(expiry: int, owner_id: str = "default") -> str:
     payload = {"exp": expiry, "nonce": secrets.token_urlsafe(12), "owner_id": owner_id}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     signature = hmac.new(_session_signing_key(), body.encode(), hashlib.sha256).hexdigest()
@@ -51,9 +51,10 @@ def _decode_session(token: str) -> dict | None:
         if int(payload["exp"]) <= int(time.time()):
             return None
         nonce = str(payload["nonce"])
-        owner_id = str(payload["owner_id"])
+        owner_id = str(payload.get("owner_id", "default"))
         if not nonce or not owner_id or storage.is_session_revoked(nonce):
             return None
+        payload["owner_id"] = owner_id
         return payload
     except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
         return None
@@ -124,7 +125,7 @@ def _owner_from_request(
     authorization: str | None,
     aibo_session: str | None,
 ) -> str:
-    if authorization and authorization.startswith("Bearer ") or aibo_session:
+    if (authorization and authorization.startswith("Bearer ")) or aibo_session:
         _, payload = _session_from_request(authorization, aibo_session)
         return str(payload["owner_id"])
     return _owner_id_from_api_key(x_aibo_api_key if x_aibo_api_key else settings.api_key)
