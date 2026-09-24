@@ -7,8 +7,8 @@ class MissionStore:
     def __init__(self):
         self._missions = {}
 
-    def create(self, objective, max_retries=3):
-        mission = new_mission(objective, max_retries)
+    def create(self, objective, max_retries=3, owner_id="default"):
+        mission = new_mission(objective, max_retries, owner_id)
         self.update(mission)
         return mission
 
@@ -21,6 +21,7 @@ class MissionStore:
         x = rows[0]
         mission = Mission(
             id=x["id"],
+            owner_id=x["owner_id"] if "owner_id" in x.keys() else "default",
             objective=x["objective"],
             status=x["status"],
             attempts=x["attempts"],
@@ -38,7 +39,7 @@ class MissionStore:
         mission.updated_at = datetime.now(timezone.utc)
         self._missions[mission.id] = mission
         storage.write(
-            "INSERT OR REPLACE INTO missions VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO missions VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (
                 mission.id,
                 mission.objective,
@@ -50,6 +51,7 @@ class MissionStore:
                 mission.created_at.isoformat(),
                 mission.updated_at.isoformat(),
                 json.dumps(mission.plan) if mission.plan is not None else None,
+                mission.owner_id,
             ),
         )
         return mission
