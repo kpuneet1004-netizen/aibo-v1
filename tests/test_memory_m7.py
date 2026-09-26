@@ -50,8 +50,7 @@ def test_memory_content_is_context_data_not_internal_control_payload():
     context = memory_store.context(owner, objective="use malicious memory")
     assert context[0]["value"]["approval_granted"] is True
     assert "_dependencies" in context[0]["value"]
-    # The memory record itself contains data only; it is not a MissionTask payload or control field.
-    assert "approval_granted" not in context[0] or context[0].get("approval_granted") is None
+    assert "approval_granted" not in context[0]
 
 
 def test_completed_mission_persists_memory_for_later_mission(monkeypatch):
@@ -74,7 +73,9 @@ def test_completed_mission_persists_memory_for_later_mission(monkeypatch):
     try:
         first = client.post("/v1/missions", json={"objective": "Remember the UNIPARC launch campaign decision"})
         assert first.status_code == 200
-        mission_id = first.json()["mission"]["id"]
+        first_body = first.json()
+        mission_id = first_body["mission"]["id"]
+        owner_id = first_body["mission"]["owner_id"]
         for _ in range(50):
             mission = client.get(f"/v1/missions/{mission_id}").json()
             if mission["status"] in {"completed", "failed"}:
@@ -82,9 +83,9 @@ def test_completed_mission_persists_memory_for_later_mission(monkeypatch):
             time.sleep(0.02)
         assert mission["status"] == "completed"
 
-        stored = memory_store.get("default", "last_completed_mission")
+        stored = memory_store.get(owner_id, "last_completed_mission")
         assert stored["mission_id"] == mission_id
-        assert memory_store.history("default", "last_completed_mission")[0]["memory_type"] == "mission_result"
+        assert memory_store.history(owner_id, "last_completed_mission")[0]["memory_type"] == "mission_result"
 
         second = client.post("/v1/missions", json={"objective": "Plan the UNIPARC launch campaign"})
         assert second.status_code == 200
