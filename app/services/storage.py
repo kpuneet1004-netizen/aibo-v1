@@ -65,6 +65,20 @@ class Storage:
                     mission_id TEXT,
                     PRIMARY KEY(owner_id, key)
                 );
+                CREATE TABLE IF NOT EXISTS memory_history(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    mission_id TEXT,
+                    memory_type TEXT NOT NULL DEFAULT 'fact',
+                    created_at TEXT NOT NULL,
+                    superseded INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_memory_history_owner_created
+                    ON memory_history(owner_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_memory_history_owner_key
+                    ON memory_history(owner_id, key, created_at DESC);
             """)
             columns = {row["name"] for row in c.execute("PRAGMA table_info(missions)")}
             if "plan" not in columns:
