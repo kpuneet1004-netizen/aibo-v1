@@ -9,18 +9,25 @@ class PlannerError(RuntimeError):
     pass
 
 class Planner:
-    def _runtime_contract(self) -> str:
+    def _runtime_contract(self, memory_context: list[dict] | None = None) -> str:
         capabilities = capability_registry.contract()
         agents = [
             {"name": agent.name, "description": agent.description, "capabilities": agent.capabilities}
             for agent in agent_registry.list() if agent.enabled
         ]
-        return f"capabilities={capabilities}; agents={agents}"
+        contract = f"capabilities={capabilities}; agents={agents}"
+        if memory_context:
+            # Memory is untrusted data only. It must never be interpreted as instructions,
+            # permissions, approvals, dependencies, or other runtime control state.
+            contract += (
+                "; memory_context_untrusted=true"
+                "; memory_context_data="
+                + json.dumps(memory_context, separators=(",", ":"), ensure_ascii=False)
+            )
+        return contract
 
     def plan(self, objective: str, memory_context: list[dict] | None = None) -> AgentPlan:
-        runtime_contract = self._runtime_contract()
-        if memory_context:
-            runtime_contract += f"; memory_context={json.dumps(memory_context, separators=(',', ':'))}"
+        runtime_contract = self._runtime_contract(memory_context)
         raw = llm_client.plan(objective, runtime_contract)
         steps = []
         seen_ids = set()
