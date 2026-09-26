@@ -1,25 +1,125 @@
-import json
-import time
 from uuid import uuid4
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response
-from app.core.config import settings
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
 from app.models.event import AiboEvent
+from app.core.config import settings
 from app.models.mission import MissionCreate, MissionStatus
 from app.models.task import MissionTask, TaskStatus
-from app.services.auth import require_api_key, require_bootstrap_key, _decode_session, _encode_session, _owner_id_from_api_key, _session_from_request
 from app.services.events import event_bus
 from app.services.memory import memory_store
 from app.services.missions import mission_store
 from app.services.planner import planner
-from app.services.queue import worker
-from app.services.storage import storage
+from app.services.queue import task_queue
 from app.services.tasks import task_store
+from app.services.worker import worker
+from app.services.storage import storage
 
-router = APIRouter()
+router = APIRouter(prefix="/v1")
+
+
+def _owner_id_from_api_key(api_key: str | None) -> str:
+    if not api_key:
+        return "default"
+    return "api:" + hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def _session_signing_key() -> bytes:
+    return hmac.new(settings.api_key.encode(), b"aibo-session-v1", hashlib.sha256).digest()
+
+
+def _encode_session(expiry: int, owner_id: str = "default") -> str:
+    payload = {"exp": expiry, "nonce": secrets.token_urlsafe(12), "owner_id": owner_id}
+    body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+    signature = hmac.new(_session_signing_key(), body.encode(), hashlib.sha256).hexdigest()
+    return f"{body}.{signature}"
+
+
+def _decode_session(token: str) -> dict | None:
+    try:
+        body, signature = token.split(".", 1)
+        expected = hmac.new(_session_signing_key(), body.encode(), hashlib.sha256).hexdigest()
+        if not secrets.compare_digest(signature, expected):
+            return None
+        padded = body + "=" * (-len(body) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        if int(payload["exp"]) <= int(time.time()):
+            return None
+        nonce = str(payload["nonce"])
+        owner_id = str(payload.get("owner_id", "default"))
+        if not nonce or not owner_id or storage.is_session_revoked(nonce):
+            return None
+        payload["owner_id"] = owner_id
+        return payload
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _valid_session(token: str) -> bool:
+    return _decode_session(token) is not None
+
+
+def _configured_api_key() -> None:
+    if not settings.api_key:
+        if settings.app_env.lower() in {"development", "test"}:
+            return
+        raise HTTPException(status_code=503, detail="Aibo API authentication is not configured")
+
+
+def require_safe_startup() -> None:
+    if settings.api_key:
+        return
+    if settings.app_env.lower() in {"development", "test"}:
+        return
+    raise RuntimeError(
+        f"Refusing to start: APP_ENV={settings.app_env!r} but AIBO_API_KEY is not set. "
+        "Set AIBO_API_KEY, or set APP_ENV=development or APP_ENV=test if this is intentional for local use."
+    )
+
+
+def require_bootstrap_key(x_aibo_api_key: str | None = Header(default=None)) -> None:
+    _configured_api_key()
+    if not settings.api_key:
+        return
+    if x_aibo_api_key and secrets.compare_digest(x_aibo_api_key, settings.api_key):
+        return
+    raise HTTPException(status_code=401, detail="Invalid Aibo API credentials")
+
+
+def require_api_key(
+    request: Request,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+) -> None:
+    _configured_api_key()
+    if not settings.api_key:
+        return
+    if x_aibo_api_key and secrets.compare_digest(x_aibo_api_key, settings.api_key):
+        return
+    if authorization and authorization.startswith("Bearer ") and _valid_session(authorization[7:].strip()):
+        return
+    if aibo_session and _valid_session(aibo_session):
+        return
+    raise HTTPException(status_code=401, detail="Invalid Aibo API credentials")
+
+
+def _session_from_request(authorization: str | None, aibo_session: str | None) -> tuple[str, dict]:
+    token = authorization[7:].strip() if authorization and authorization.startswith("Bearer ") else aibo_session
+    if not token:
+        raise HTTPException(status_code=400, detail="Aibo session token required")
+    payload = _decode_session(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid Aibo session")
+    return token, payload
 
 
 def _owner_from_request(x_aibo_api_key: str | None, authorization: str | None, aibo_session: str | None) -> str:
-    if authorization or aibo_session:
+    if (authorization and authorization.startswith("Bearer ")) or aibo_session:
         _, payload = _session_from_request(authorization, aibo_session)
         return str(payload["owner_id"])
     return _owner_id_from_api_key(x_aibo_api_key if x_aibo_api_key else settings.api_key)
@@ -85,12 +185,7 @@ def create_mission(
 
 
 @router.post("/missions/{mission_id}/approve", dependencies=[Depends(require_api_key)])
-def approve_mission(
-    mission_id: str,
-    x_aibo_api_key: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
-    aibo_session: str | None = Cookie(default=None),
-):
+def approve_mission(mission_id: str, x_aibo_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None), aibo_session: str | None = Cookie(default=None)):
     owner_id = _owner_from_request(x_aibo_api_key, authorization, aibo_session)
     mission = mission_store.get(mission_id)
     if mission is None:
@@ -111,3 +206,31 @@ def approve_mission(
     mission_store.update(mission)
     event_bus.publish(AiboEvent(type="mission.approved", payload={"mission_id": mission_id}))
     return {"mission": mission, "tasks": tasks}
+
+
+@router.get("/missions/{mission_id}", dependencies=[Depends(require_api_key)])
+def get_mission(mission_id: str, x_aibo_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None), aibo_session: str | None = Cookie(default=None)):
+    owner_id = _owner_from_request(x_aibo_api_key, authorization, aibo_session)
+    mission = mission_store.get(mission_id)
+    if mission is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    _require_mission_owner(mission, owner_id)
+    return mission
+
+
+@router.get("/tasks/{task_id}", dependencies=[Depends(require_api_key)])
+def get_task(task_id: str):
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@router.get("/events", dependencies=[Depends(require_api_key)])
+def recent_events(limit: int = 50):
+    return event_bus.recent(max(1, min(limit, 100)))
+
+
+@router.get("/worker", dependencies=[Depends(require_api_key)])
+def worker_status():
+    return {"worker_id": worker.worker_id, "running": worker.running, "queue_size": task_queue.size()}
