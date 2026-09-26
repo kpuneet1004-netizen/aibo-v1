@@ -19,18 +19,13 @@ class MemoryStore:
             raise ValueError(f"unsupported memory type: {memory_type}")
         return memory_type
 
-    def save(
-        self,
-        owner_id: str,
-        key: str,
-        value,
-        mission_id: str | None = None,
-        memory_type: str = "fact",
-    ):
+    def save(self, owner_id: str, key: str, value, mission_id: str | None = None, memory_type: str = "fact"):
         if not owner_id:
             raise ValueError("owner_id is required")
         if not key or len(key) > self.MAX_KEY_LENGTH:
             raise ValueError("memory key must be 1-128 characters")
+        if key == "last_completed_mission" and memory_type == "fact":
+            memory_type = "mission_result"
         memory_type = self._validate_type(memory_type)
         serialized = json.dumps(value, separators=(",", ":"))
         if len(serialized.encode("utf-8")) > self.MAX_VALUE_BYTES:
@@ -53,10 +48,7 @@ class MemoryStore:
                 connection.commit()
 
     def get(self, owner_id: str, key: str):
-        rows = storage.execute(
-            "SELECT value FROM memories WHERE owner_id=? AND key=?",
-            (owner_id, key),
-        )
+        rows = storage.execute("SELECT value FROM memories WHERE owner_id=? AND key=?", (owner_id, key))
         if not rows:
             return None
         return json.loads(rows[0]["value"])
@@ -74,15 +66,7 @@ class MemoryStore:
                 (owner_id, key, limit),
             )
         return [
-            {
-                "id": row["id"],
-                "key": row["key"],
-                "value": json.loads(row["value"]),
-                "mission_id": row["mission_id"],
-                "memory_type": row["memory_type"],
-                "created_at": row["created_at"],
-                "superseded": bool(row["superseded"]),
-            }
+            {"id": row["id"], "key": row["key"], "value": json.loads(row["value"]), "mission_id": row["mission_id"], "memory_type": row["memory_type"], "created_at": row["created_at"], "superseded": bool(row["superseded"])}
             for row in rows
         ]
 
@@ -99,13 +83,7 @@ class MemoryStore:
                 (owner_id, mission_id, limit),
             )
         return [
-            {
-                "key": row["key"],
-                "value": json.loads(row["value"]),
-                "mission_id": row["mission_id"],
-                "memory_type": row["memory_type"],
-                "created_at": row["created_at"],
-            }
+            {"key": row["key"], "value": json.loads(row["value"]), "mission_id": row["mission_id"], "memory_type": row["memory_type"], "created_at": row["created_at"]}
             for row in rows
         ]
 
@@ -114,9 +92,9 @@ class MemoryStore:
         return {token for token in re.findall(r"[a-z0-9_]+", str(text).lower()) if len(token) > 2}
 
     def context(self, owner_id: str, objective: str | None = None, limit: int = DEFAULT_CONTEXT_LIMIT):
-        """Return bounded owner memory ranked by lexical relevance, with recency as a tie-breaker.
+        """Return bounded owner memory ranked by lexical relevance.
 
-        Retrieved memory is context/data only. It is never treated as runtime control state.
+        Retrieved memory is untrusted context/data only; it cannot alter runtime control state.
         """
         limit = max(1, min(int(limit), self.DEFAULT_CONTEXT_LIMIT))
         memories = self.list(owner_id, limit=self.DEFAULT_CONTEXT_LIMIT)
