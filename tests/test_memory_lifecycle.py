@@ -3,6 +3,7 @@ from app.services.llm import llm_client
 from app.services.memory import memory_store
 from app.services.missions import MissionStore
 from app.services.planner import Planner
+import pytest
 
 
 def test_mission_owner_round_trips_through_storage(tmp_path, monkeypatch):
@@ -56,3 +57,22 @@ def test_memory_is_owner_isolated():
 
     assert memory_store.get("owner-a", "secret") == {"value": 1}
     assert memory_store.get("owner-b", "secret") == {"value": 2}
+
+
+def test_memory_context_is_bounded():
+    for index in range(memory_store.DEFAULT_CONTEXT_LIMIT + 5):
+        memory_store.save("bounded-owner", f"key-{index}", {"index": index})
+
+    context = memory_store.context("bounded-owner", limit=100)
+    assert len(context) == memory_store.DEFAULT_CONTEXT_LIMIT
+    assert context[0]["key"] == "key-24"
+
+
+def test_memory_value_size_is_bounded():
+    with pytest.raises(ValueError, match="16 KiB"):
+        memory_store.save("owner-a", "oversized", "x" * (memory_store.MAX_VALUE_BYTES + 1))
+
+
+def test_memory_key_size_is_bounded():
+    with pytest.raises(ValueError, match="1-128"):
+        memory_store.save("owner-a", "k" * (memory_store.MAX_KEY_LENGTH + 1), "value")
