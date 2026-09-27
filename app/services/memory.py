@@ -9,15 +9,36 @@ class MemoryStore:
 
     MAX_KEY_LENGTH = 128
     MAX_VALUE_BYTES = 16_384
+    MAX_VALUE_DEPTH = 8
     DEFAULT_CONTEXT_LIMIT = 20
     MAX_HISTORY_LIMIT = 100
     MEMORY_TYPES = {"fact", "preference", "decision", "experience", "mission_result"}
+    SENSITIVE_FIELD_NAMES = {
+        "password", "passwd", "secret", "token", "api_key", "apikey",
+        "authorization", "cookie", "set_cookie", "private_key", "client_secret",
+        "access_token", "refresh_token", "session_token", "credit_card", "card_number",
+        "cvv", "ssn", "social_security_number",
+    }
 
     def _validate_type(self, memory_type: str) -> str:
         memory_type = str(memory_type or "fact").strip().lower()
         if memory_type not in self.MEMORY_TYPES:
             raise ValueError(f"unsupported memory type: {memory_type}")
         return memory_type
+
+    @classmethod
+    def _validate_value(cls, value, depth: int = 0) -> None:
+        if depth > cls.MAX_VALUE_DEPTH:
+            raise ValueError(f"memory value exceeds maximum nesting depth of {cls.MAX_VALUE_DEPTH}")
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized = re.sub(r"[^a-z0-9]+", "_", str(key).strip().lower()).strip("_")
+                if normalized in cls.SENSITIVE_FIELD_NAMES:
+                    raise ValueError(f"memory value contains restricted field: {key}")
+                cls._validate_value(nested, depth + 1)
+        elif isinstance(value, (list, tuple)):
+            for nested in value:
+                cls._validate_value(nested, depth + 1)
 
     def save(self, owner_id: str, key: str, value, mission_id: str | None = None, memory_type: str = "fact"):
         if not owner_id:
@@ -27,6 +48,7 @@ class MemoryStore:
         if key == "last_completed_mission" and memory_type == "fact":
             memory_type = "mission_result"
         memory_type = self._validate_type(memory_type)
+        self._validate_value(value)
         serialized = json.dumps(value, separators=(",", ":"))
         if len(serialized.encode("utf-8")) > self.MAX_VALUE_BYTES:
             raise ValueError("memory value exceeds the 16 KiB limit")
