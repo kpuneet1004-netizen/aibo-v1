@@ -76,3 +76,21 @@ def test_memory_value_size_is_bounded():
 def test_memory_key_size_is_bounded():
     with pytest.raises(ValueError, match="1-128"):
         memory_store.save("owner-a", "k" * (memory_store.MAX_KEY_LENGTH + 1), "value")
+
+
+def test_memory_rejects_sensitive_fields_recursively():
+    with pytest.raises(ValueError, match="restricted field"):
+        memory_store.save("owner-a", "profile", {"preferences": {"api_key": "secret"}})
+
+
+def test_memory_rejects_sensitive_fields_in_lists():
+    with pytest.raises(ValueError, match="restricted field"):
+        memory_store.save("owner-a", "history", [{"event": "login", "session_token": "secret"}])
+
+
+def test_memory_rejects_excessive_nesting():
+    value = "leaf"
+    for _ in range(memory_store.MAX_VALUE_DEPTH + 1):
+        value = {"nested": value}
+    with pytest.raises(ValueError, match="maximum nesting depth"):
+        memory_store.save("owner-a", "deep", value)
