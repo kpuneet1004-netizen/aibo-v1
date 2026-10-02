@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.models.mission import Mission
 from app.models.task import MissionTask
-from app.services import api
+from app import api
 
 
 def test_task_lookup_rejects_foreign_mission_owner(monkeypatch):
