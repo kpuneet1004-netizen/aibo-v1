@@ -219,9 +219,18 @@ def get_mission(mission_id: str, x_aibo_api_key: str | None = Header(default=Non
 
 
 @router.get("/tasks/{task_id}", dependencies=[Depends(require_api_key)])
-def get_task(task_id: str):
+def get_task(
+    task_id: str,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+):
+    owner_id = _owner_from_request(x_aibo_api_key, authorization, aibo_session)
     task = task_store.get(task_id)
     if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    mission = mission_store.get(task.mission_id)
+    if mission is None or mission.owner_id != owner_id:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
