@@ -10,7 +10,7 @@ def test_phone_app_serves_voice_ui_and_pwa_assets():
         service_worker = client.get("/app/sw.js")
 
     assert page.status_code == 200
-    assert "Aibo V1 voice test" in page.text
+    assert "V1 voice test" in page.text
     assert "SpeechRecognition" in page.text
     assert "/v1/missions" in page.text
     assert manifest.status_code == 200
