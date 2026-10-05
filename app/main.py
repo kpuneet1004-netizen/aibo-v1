@@ -8,6 +8,8 @@ from app.services.agents import agent_registry
 from app.services.missions import mission_store
 from app.services.worker import worker
 
+STATIC_DIR = Path(__file__).parent / "static"
+
 @asynccontextmanager
 async def lifespan(_app):
     require_safe_startup()
@@ -32,7 +34,14 @@ def health():
 @app.get("/v1/status", dependencies=[Depends(require_api_key)])
 def status(): return {"service":settings.app_name,"missions":mission_store.count(),"agents":len(agent_registry.list()),"worker_running":worker.running}
 
-
 @app.get("/app", include_in_schema=False)
 def phone_app():
-    return FileResponse(Path(__file__).parent / "static" / "index.html", media_type="text/html")
+    return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+@app.get("/app/manifest.json", include_in_schema=False)
+def app_manifest():
+    return FileResponse(STATIC_DIR / "manifest.json", media_type="application/manifest+json")
+
+@app.get("/app/sw.js", include_in_schema=False)
+def app_service_worker():
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
