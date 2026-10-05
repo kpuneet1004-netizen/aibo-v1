@@ -16,9 +16,9 @@ h1{font-size:34px;line-height:1.05;margin:12px 0 4px}.sub{color:#999;margin-bott
 .card{background:#151518cc;border:1px solid #2b2b31;border-radius:18px;padding:16px;margin-bottom:14px;backdrop-filter:blur(10px)}
 label{display:block;font-size:13px;color:#aaa;margin-bottom:7px}
 input,textarea,button{width:100%;font:inherit;border-radius:12px;border:1px solid #333;background:#0f0f11;color:#fff;padding:12px}
-textarea{min-height:100px;resize:vertical}button{background:#fff;color:#111;border:0;font-weight:700;margin-top:10px;cursor:pointer;min-height:46px}button.secondary{background:#222;color:#fff;border:1px solid #3a3a40}button.danger{background:#4b1616;color:#fff}button:disabled{opacity:.5;cursor:not-allowed}
+textarea{min-height:100px;resize:vertical}button{background:#fff;color:#111;border:0;font-weight:700;margin-top:10px;cursor:pointer;min-height:46px}button.secondary{background:#222;color:#fff;border:1px solid #3a3a40}button:disabled{opacity:.5;cursor:not-allowed}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.voice{display:flex;align-items:center;justify-content:center;gap:10px;font-size:18px;min-height:58px}.voice.listening{background:#b91c1c;color:#fff}.voice-dot{width:10px;height:10px;border-radius:50%;background:#888}.listening .voice-dot{background:#fff;box-shadow:0 0 0 7px #ffffff22}
-.status{white-space:pre-wrap;color:#bbb;line-height:1.5}.status strong{color:#fff}.transcript{margin-top:10px;padding:12px;border-radius:12px;background:#0f0f11;border:1px solid #29292f;min-height:44px;color:#ddd}.hint{font-size:12px;color:#888;margin-top:8px}.hidden{display:none}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#25252b;color:#bbb;font-size:12px;margin-bottom:10px}
+.status{white-space:pre-wrap;color:#bbb;line-height:1.5}.transcript{margin-top:10px;padding:12px;border-radius:12px;background:#0f0f11;border:1px solid #29292f;min-height:44px;color:#ddd}.hint{font-size:12px;color:#888;margin-top:8px}.hidden{display:none}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#25252b;color:#bbb;font-size:12px;margin-bottom:10px}
 @media (max-width:420px){main{padding-left:14px;padding-right:14px}h1{font-size:30px}.row{grid-template-columns:1fr}}
 </style>
 </head>
@@ -43,6 +43,7 @@ textarea{min-height:100px;resize:vertical}button{background:#fff;color:#111;bord
 <label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:#aaa"><input id="auto" type="checkbox" style="width:auto"> Auto-execute after speech ends</label>
 </section>
 <section id="result" class="card hidden"><div class="status" id="status"></div><div id="approval" class="hidden"><button id="approve">Approve mission</button></div></section>
+</main>
 <script>
 const $=id=>document.getElementById(id);
 let recognition=null;
@@ -64,6 +65,7 @@ function setupSpeech(){
   };
   $("support").textContent="Voice input is available. Your transcript is treated as a normal mission objective and still goes through Aibo's existing planner, capability verification and approval flow.";
 }
+if("serviceWorker" in navigator){navigator.serviceWorker.register("/app/sw.js").catch(()=>{});}
 async function checkSession(){try{const r=await fetch("/v1/status");if(r.ok){connected();setupSpeech();}}catch(e){}}
 checkSession();
 $("connect").onclick=async()=>{
