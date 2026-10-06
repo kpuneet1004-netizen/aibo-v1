@@ -4,68 +4,108 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/app/manifest.json">
 <title>Aibo</title>
 <style>
-:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#eee;background:#0b0b0c}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#202025,#0b0b0c 55%);display:flex;justify-content:center}
-main{width:min(680px,100%);padding:24px 18px 32px}
-h1{font-size:34px;margin:12px 0 4px}.sub{color:#999;margin-bottom:24px}
-.card{background:#151518;border:1px solid #2a2a2f;border-radius:18px;padding:16px;margin-bottom:14px}
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eee;background:#09090a;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#22232a,#09090a 58%);display:flex;justify-content:center}
+main{width:min(680px,100%);padding:24px 18px calc(32px + env(safe-area-inset-bottom));}
+h1{font-size:34px;line-height:1.05;margin:12px 0 4px}.sub{color:#999;margin-bottom:22px}
+.card{background:#151518cc;border:1px solid #2b2b31;border-radius:18px;padding:16px;margin-bottom:14px;backdrop-filter:blur(10px)}
 label{display:block;font-size:13px;color:#aaa;margin-bottom:7px}
 input,textarea,button{width:100%;font:inherit;border-radius:12px;border:1px solid #333;background:#0f0f11;color:#fff;padding:12px}
-textarea{min-height:110px;resize:vertical}button{background:#fff;color:#111;border:0;font-weight:700;margin-top:10px;cursor:pointer}
-button:disabled{opacity:.5}.status{white-space:pre-wrap;color:#bbb;line-height:1.5}.hidden{display:none}
+textarea{min-height:100px;resize:vertical}button{background:#fff;color:#111;border:0;font-weight:700;margin-top:10px;cursor:pointer;min-height:46px}button.secondary{background:#222;color:#fff;border:1px solid #3a3a40}button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.voice{display:flex;align-items:center;justify-content:center;gap:10px;font-size:18px;min-height:58px}.voice.listening{background:#b91c1c;color:#fff}.voice-dot{width:10px;height:10px;border-radius:50%;background:#888}.listening .voice-dot{background:#fff;box-shadow:0 0 0 7px #ffffff22}
+.status{white-space:pre-wrap;color:#bbb;line-height:1.5}.hint{font-size:12px;color:#888;margin-top:8px}.hidden{display:none}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#25252b;color:#bbb;font-size:12px;margin-bottom:10px}
+@media (max-width:420px){main{padding-left:14px;padding-right:14px}h1{font-size:30px}.row{grid-template-columns:1fr}}
 </style>
 </head>
 <body><main>
-<h1>Aibo</h1><div class="sub">Personal AI execution core · Alpha</div>
+<h1>Aibo</h1><div class="sub">Personal AI execution core · V1 voice test</div>
 <section id="login" class="card">
-<label>API key — used only to establish a session</label>
+<label for="key">API key — used only to establish your Aibo session</label>
 <input id="key" type="password" autocomplete="off" placeholder="AIBO_API_KEY">
 <button id="connect">Connect</button>
+<div class="hint">The key is sent only to Aibo's session endpoint. The active session is then held in an HttpOnly cookie.</div>
 </section>
 <section id="mission" class="card hidden">
-<label>What should Aibo do?</label>
-<textarea id="objective" placeholder="e.g. Fetch https://example.com and inspect it"></textarea>
-<button id="run">Run mission</button>
+<span class="pill">Voice command</span>
+<button id="listen" class="voice"><span class="voice-dot"></span><span id="listenText">Tap to speak</span></button>
+<div id="support" class="hint"></div>
+<label for="objective" style="margin-top:14px">Command</label>
+<textarea id="objective" placeholder="Speak a command or type one here"></textarea>
+<div class="row">
+<button id="run">Execute command</button>
+<button id="clear" class="secondary">Clear</button>
+</div>
+<label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:#aaa"><input id="auto" type="checkbox" style="width:auto"> Auto-execute after speech ends</label>
 </section>
-<section id="result" class="card hidden"><div class="status" id="status"></div></section>
+<section id="result" class="card hidden"><div class="status" id="status"></div><div id="approval" class="hidden"><button id="approve">Approve mission</button></div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const authHeaders=()=>({"Content-Type":"application/json"});
+let recognition=null;
+let currentMissionId=null;
+const finalStatuses=new Set(["completed","failed","cancelled","waiting_approval"]);
 function connected(){ $("login").classList.add("hidden"); $("mission").classList.remove("hidden"); }
-async function checkSession(){
-  const r=await fetch("/v1/status");
-  if(r.ok) connected();
+function speak(text){if(!text||!("speechSynthesis" in window))return;window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(text);utterance.lang=navigator.language||"en-IN";utterance.rate=.98;window.speechSynthesis.speak(utterance);}
+function showResult(text,voiceText=null){$("result").classList.remove("hidden");$("status").textContent=text;if(voiceText)speak(voiceText);}
+function setupSpeech(){
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRecognition){$("listen").disabled=true;$("support").textContent="Voice input is not supported by this browser. Use a supported mobile browser or type the command.";return;}
+  recognition=new SpeechRecognition();
+  recognition.lang=navigator.language||"en-IN"; recognition.interimResults=true; recognition.continuous=false;
+  recognition.onstart=()=>{$("listen").classList.add("listening");$("listenText").textContent="Listening…";$("objective").placeholder="Speak now…";};
+  recognition.onresult=(event)=>{let text="";for(let i=0;i<event.results.length;i++)text+=event.results[i][0].transcript;$("objective").value=text.trim();};
+  recognition.onerror=(event)=>{showResult("Voice input error: "+event.error,"I couldn't hear that. Please try again.");};
+  recognition.onend=()=>{
+    $("listen").classList.remove("listening");$("listenText").textContent="Tap to speak";$("objective").placeholder="Speak a command or type one here";
+    if($("auto").checked&&$("objective").value.trim()) runMission();
+  };
+  $("support").textContent="Voice input and spoken responses are enabled. The transcript is treated as a normal mission objective and still goes through Aibo's existing planner, capability verification and approval flow.";
 }
+if("serviceWorker" in navigator){navigator.serviceWorker.register("/app/sw.js").catch(()=>{});}
+async function checkSession(){try{const r=await fetch("/v1/status");if(r.ok){connected();setupSpeech();}}catch(e){}}
 checkSession();
 $("connect").onclick=async()=>{
-  const key=$("key").value.trim(); if(!key)return;
-  $("connect").disabled=true;
-  try{
-    const r=await fetch("/v1/session",{method:"POST",headers:{"X-Aibo-API-Key":key}});
-    if(!r.ok) throw new Error("Authentication failed");
-    await r.json(); $("key").value=""; connected();
-  }catch(e){$("status").textContent=e.message; $("result").classList.remove("hidden")}
-  finally{$("connect").disabled=false}
+  const key=$("key").value.trim();if(!key)return;$("connect").disabled=true;
+  try{const r=await fetch("/v1/session",{method:"POST",headers:{"X-Aibo-API-Key":key}});if(!r.ok)throw new Error("Authentication failed");await r.json();$("key").value="";connected();setupSpeech();speak("Aibo is ready.");}
+  catch(e){showResult(e.message,"Authentication failed.")}finally{$("connect").disabled=false}
 };
-$("run").onclick=async()=>{
-  const objective=$("objective").value.trim(); if(!objective)return;
-  $("run").disabled=true; $("result").classList.remove("hidden"); $("status").textContent="Planning…";
+$("listen").onclick=()=>{if(!recognition)return;try{recognition.start();}catch(e){}};
+$("clear").onclick=()=>{$("objective").value="";$("status").textContent="";$('result').classList.add('hidden');$('approval').classList.add('hidden');currentMissionId=null;};
+$("run").onclick=runMission;
+async function runMission(){
+  const objective=$("objective").value.trim();if(!objective)return;
+  $("run").disabled=true;$("result").classList.remove("hidden");$("approval").classList.add("hidden");$("status").textContent="Planning…";speak("Planning your command.");
   try{
-    const r=await fetch("/v1/missions",{method:"POST",headers:authHeaders(),body:JSON.stringify({objective})});
-    if(!r.ok) throw new Error(await r.text());
-    const body=await r.json(); const id=body.mission.id; $("status").textContent="Mission "+id+"\nStatus: "+body.mission.status;
-    for(let i=0;i<60;i++){
-      await new Promise(x=>setTimeout(x,500));
-      const m=await fetch("/v1/missions/"+id);
-      if(m.status===401){location.reload();return}
-      const mission=await m.json(); $("status").textContent="Mission "+id+"\nStatus: "+mission.status;
-      if(["completed","failed","cancelled","waiting_approval"].includes(mission.status)){if(mission.result)$("status").textContent+="\n\n"+JSON.stringify(mission.result,null,2);break}
+    const r=await fetch("/v1/missions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({objective})});
+    if(r.status===401){location.reload();return}if(!r.ok)throw new Error(await r.text());
+    const body=await r.json();currentMissionId=body.mission.id;await pollMission();
+  }catch(e){$("status").textContent="Error: "+e.message;speak("I couldn't start that mission.")}finally{$("run").disabled=false}
+}
+async function pollMission(){
+  if(!currentMissionId)return;
+  for(let i=0;i<120;i++){
+    await new Promise(x=>setTimeout(x,500));
+    const r=await fetch("/v1/missions/"+currentMissionId);
+    if(r.status===401){location.reload();return}if(!r.ok)throw new Error(await r.text());
+    const mission=await r.json();$("status").textContent="Mission "+currentMissionId+"\nStatus: "+mission.status+(mission.error?"\n\nError: "+mission.error:"");
+    if(mission.status==="waiting_approval"){$("approval").classList.remove("hidden");speak("This mission needs your approval before I continue.");return;}
+    if(finalStatuses.has(mission.status)){
+      if(mission.result)$("status").textContent+="\n\n"+JSON.stringify(mission.result,null,2);
+      if(mission.status==="completed")speak("Mission completed.");else if(mission.status==="failed")speak("The mission failed. Please check the result.");
+      return;
     }
-  }catch(e){$("status").textContent="Error: "+e.message}
-  finally{$("run").disabled=false}
+  }
+  $("status").textContent+="\n\nStill running. Check the mission again later.";speak("The mission is still running.");
+}
+$("approve").onclick=async()=>{
+  if(!currentMissionId)return;$("approve").disabled=true;
+  try{const r=await fetch("/v1/missions/"+currentMissionId+"/approve",{method:"POST"});if(r.status===401){location.reload();return}if(!r.ok)throw new Error(await r.text());$("approval").classList.add("hidden");speak("Approval received. Continuing the mission.");await pollMission();}
+  catch(e){$("status").textContent="Approval error: "+e.message;speak("I couldn't approve that mission.")}finally{$("approve").disabled=false}
 };
 </script>
 </body></html>

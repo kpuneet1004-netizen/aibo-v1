@@ -1,0 +1,11 @@
+{
+  "name": "Aibo V1",
+  "short_name": "Aibo",
+  "start_url": "/app",
+  "scope": "/app",
+  "display": "standalone",
+  "background_color": "#09090a",
+  "theme_color": "#111111",
+  "description": "Aibo personal AI execution core",
+  "icons": []
+}

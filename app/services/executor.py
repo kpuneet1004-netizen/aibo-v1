@@ -97,17 +97,18 @@ class TaskExecutor:
         return task
 
     def _fail_blocked_dependents(self, failed_task_id: str, mission_id: str, error: str) -> None:
+        blocked_ids = {failed_task_id}
         changed = True
         while changed:
             changed = False
             for dependent in task_store.for_mission(mission_id):
-                if dependent.status != TaskStatus.QUEUED or failed_task_id not in dependent.depends_on:
+                if dependent.status != TaskStatus.QUEUED or not any(dep_id in blocked_ids for dep_id in dependent.depends_on):
                     continue
                 dependent.status = TaskStatus.FAILED
                 dependent.error = f"Blocked by failed dependency {failed_task_id}: {error}"
                 task_store.save(dependent)
                 event_bus.publish(AiboEvent(type="task.failed", payload={"task_id": dependent.id, "mission_id": mission_id, "error": dependent.error}))
-                failed_task_id = dependent.id
+                blocked_ids.add(dependent.id)
                 changed = True
 
     def _fail(self, task, error):
