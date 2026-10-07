@@ -1,8 +1,10 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlparse
 import ipaddress
+import re
 import socket
 import httpx
 from app.services.llm import llm_client
@@ -110,6 +112,83 @@ def _resolve_pinned_address(url: str) -> tuple[str, str, str, int]:
         _reject_if_unsafe_address(candidate, message="hostname resolves to a private or local IP address")
     return parsed.scheme, host, str(addresses[0]), port
 
+
+# --- HTML content extraction -------------------------------------------------
+# fetch_url previously returned response.text verbatim for every content
+# type, including HTML pages -- meaning raw markup (script/style tags,
+# attributes, boilerplate) flowed directly into summarize_text instead of
+# the page's actual visible content. This section narrowly fixes that: it
+# only changes what `text` contains when the response is HTML. SSRF
+# protection, URL validation, the response-size limit, and everything about
+# how the request itself is made are untouched above and below this block.
+
+_SKIP_TEXT_TAGS = {"script", "style", "noscript"}
+_BLOCK_TAGS = {
+    "p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+    "tr", "table", "blockquote", "section", "article", "header", "footer", "ul", "ol",
+}
+
+class _VisibleTextExtractor(HTMLParser):
+    """Extracts visible page text from HTML, dropping script/style/noscript
+    content and inserting line breaks at block-level element boundaries so
+    paragraphs and headings don't collapse into one run-on string.
+    convert_charrefs defaults to True, so HTML entities (&amp;, &#39;, ...)
+    are already decoded to plain Unicode by the time handle_data sees them.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip_depth = 0
+        self._chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in _SKIP_TEXT_TAGS:
+            self._skip_depth += 1
+        elif tag in _BLOCK_TAGS:
+            self._chunks.append("\n")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in _BLOCK_TAGS:
+            self._chunks.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_TEXT_TAGS:
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+        elif tag in _BLOCK_TAGS:
+            self._chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0 and data:
+            self._chunks.append(data)
+
+    def get_text(self) -> str:
+        raw = "".join(self._chunks)
+        lines = (re.sub(r"[ \t\r\f\v]+", " ", line).strip() for line in raw.split("\n"))
+        return "\n".join(line for line in lines if line)
+
+def _is_html_content_type(content_type: str) -> bool:
+    return content_type.split(";")[0].strip().lower() == "text/html"
+
+def _extract_visible_text(html_source: str) -> str:
+    parser = _VisibleTextExtractor()
+    try:
+        parser.feed(html_source)
+        parser.close()
+    except Exception:
+        # Malformed markup should never break the fetch -- fall back to the
+        # raw source rather than raising, since returning something usable
+        # matters more here than strict HTML validity.
+        return html_source
+    text = parser.get_text()
+    # A page that is entirely script/style with no visible text at all would
+    # otherwise return an empty string, which is a valid `str` and would
+    # pass verification, but is useless to summarize_text and to the
+    # dependency-injection fallback (both require non-empty text). Prefer
+    # returning the raw source over returning nothing.
+    return text if text else html_source
+
+
 def fetch_url(payload: dict[str, Any]) -> dict[str, Any]:
     url = str(payload.get("url", "")).strip()
     scheme, original_host, pinned_ip, port = _resolve_pinned_address(url)
@@ -129,7 +208,11 @@ def fetch_url(payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(f"URL fetch failed: {exc}") from exc
     if len(response.content) > 1_000_000:
         raise RuntimeError("URL response exceeds 1 MB limit")
-    return {"url": url, "status_code": response.status_code, "content_type": response.headers.get("content-type", ""), "text": response.text}
+    content_type = response.headers.get("content-type", "")
+    text = response.text
+    if _is_html_content_type(content_type):
+        text = _extract_visible_text(text)
+    return {"url": url, "status_code": response.status_code, "content_type": content_type, "text": text}
 
 capability_registry = CapabilityRegistry()
 capability_registry.register(CapabilityDefinition("respond", "Generate a response using the configured LLM.", "low", False, respond_with_llm, _verify_text_response))
