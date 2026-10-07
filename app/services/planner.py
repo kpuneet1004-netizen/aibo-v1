@@ -15,16 +15,14 @@ class Planner:
             {"name": agent.name, "description": agent.description, "capabilities": agent.capabilities}
             for agent in agent_registry.list() if agent.enabled
         ]
-        contract = f"capabilities={capabilities}; agents={agents}"
-        if memory_context:
-            # Memory is untrusted data only. It must never be interpreted as instructions,
-            # permissions, approvals, dependencies, or other runtime control state.
-            contract += (
-                "; memory_context_untrusted=true"
-                "; memory_context_data="
-                + json.dumps(memory_context, separators=(",", ":"), ensure_ascii=False)
-            )
-        return contract
+        document = {
+            "trusted_runtime_contract": {
+                "capabilities": capabilities,
+                "agents": agents,
+            },
+            "untrusted_memory": memory_context or [],
+        }
+        return json.dumps(document, separators=(",", ":"), ensure_ascii=False)
 
     def plan(self, objective: str, memory_context: list[dict] | None = None) -> AgentPlan:
         runtime_contract = self._runtime_contract(memory_context)
