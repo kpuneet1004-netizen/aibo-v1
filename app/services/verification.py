@@ -15,6 +15,12 @@ class Verifier:
             raise VerificationError(f"Capability unavailable: {capability}")
         if definition.verify is None:
             raise VerificationError(f"No verification contract for capability: {capability}")
+        evidence = result.get("external_action_evidence")
+        if evidence is not None:
+            if not isinstance(evidence, bool):
+                raise VerificationError("external_action_evidence must be boolean")
+            if evidence and not definition.establishes_external_action:
+                raise VerificationError("capability cannot establish external action")
         try:
             definition.verify(result)
         except VerificationError:
