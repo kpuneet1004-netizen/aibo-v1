@@ -12,9 +12,23 @@ from app.services.llm import llm_client
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
 VerifierFn = Callable[[dict[str, Any]], None]
 
+_UNSUPPORTED_ACTION_CLAIM_PATTERNS = (
+    r"\b(?:i|we)\s+(?:have\s+)?sent\b",
+    r"\b(?:the\s+)?email\s+(?:has\s+been|was)\s+sent\b",
+    r"\b(?:i|we)\s+(?:have\s+)?(?:booked|purchased|transferred|refunded|deleted|posted|cancelled|canceled)\b",
+    r"\b(?:successfully|already)\s+(?:sent|booked|purchased|transferred|refunded|deleted|posted|cancelled|canceled)\b",
+    r"\b(?:your|the)\s+(?:account|password|order)\s+(?:has\s+been|was)\s+(?:updated|changed|cancelled|canceled|deleted)\b",
+)
+
+def _contains_unsupported_action_claim(text: str) -> bool:
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _UNSUPPORTED_ACTION_CLAIM_PATTERNS)
+
 def _verify_text_response(result: dict[str, Any]) -> None:
-    if not isinstance(result.get("text"), str) or not result["text"].strip():
+    text = result.get("text")
+    if not isinstance(text, str) or not text.strip():
         raise ValueError("respond/execute returned empty text")
+    if _contains_unsupported_action_claim(text):
+        raise ValueError("response claims an external action without execution evidence")
 
 def _verify_fetch_url(result: dict[str, Any]) -> None:
     if not isinstance(result.get("status_code"), int) or not 200 <= result["status_code"] < 300:
