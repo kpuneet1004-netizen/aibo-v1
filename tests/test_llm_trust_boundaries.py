@@ -73,3 +73,24 @@ def test_respond_verification_rejects_unsupported_external_action_claims(text):
 )
 def test_respond_verification_allows_non_claims(text):
     _verify_text_response({"text": text})
+
+
+def test_external_action_evidence_is_capability_scoped():
+    from app.services.verification import VerificationError, verifier
+
+    with pytest.raises(VerificationError, match="cannot establish external action"):
+        verifier.verify("respond", {"text": "I sent the email.", "external_action_evidence": True})
+
+
+def test_external_action_evidence_must_be_boolean():
+    from app.services.verification import VerificationError, verifier
+
+    with pytest.raises(VerificationError, match="must be boolean"):
+        verifier.verify("respond", {"text": "I sent the email.", "external_action_evidence": "true"})
+
+
+def test_capability_contract_declares_external_action_authority():
+    from app.services.capabilities import capability_registry
+
+    assert capability_registry.definition("respond").establishes_external_action is False
+    assert capability_registry.definition("execute").establishes_external_action is False
