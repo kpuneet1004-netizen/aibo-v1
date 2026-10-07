@@ -56,6 +56,7 @@ class CapabilityDefinition:
     requires_approval: bool
     handler: Handler
     verify: VerifierFn | None = None
+    establishes_external_action: bool = False
 
 class CapabilityRegistry:
     def __init__(self) -> None:
@@ -229,10 +230,10 @@ def fetch_url(payload: dict[str, Any]) -> dict[str, Any]:
     return {"url": url, "status_code": response.status_code, "content_type": content_type, "text": text}
 
 capability_registry = CapabilityRegistry()
-capability_registry.register(CapabilityDefinition("respond", "Generate a response using the configured LLM.", "low", False, respond_with_llm, _verify_text_response))
-capability_registry.register(CapabilityDefinition("execute", "Compatibility capability for LLM execution.", "low", False, execute_with_llm, _verify_text_response))
-capability_registry.register(CapabilityDefinition("fetch_url", "Fetch a public HTTP(S) URL and return its response.", "external_read", False, fetch_url, _verify_fetch_url))
-capability_registry.register(CapabilityDefinition("summarize_text", "Summarize supplied or dependency-provided text.", "low", False, summarize_text, _verify_summarize_text))
+capability_registry.register(CapabilityDefinition("respond", "Generate a response using the configured LLM.", "low", False, respond_with_llm, _verify_text_response, False))
+capability_registry.register(CapabilityDefinition("execute", "Compatibility capability for LLM execution.", "low", False, execute_with_llm, _verify_text_response, False))
+capability_registry.register(CapabilityDefinition("fetch_url", "Fetch a public HTTP(S) URL and return its response.", "external_read", False, fetch_url, _verify_fetch_url, False))
+capability_registry.register(CapabilityDefinition("summarize_text", "Summarize supplied or dependency-provided text.", "low", False, summarize_text, _verify_summarize_text, False))
 
 for _definition in capability_registry._definitions.values():
     if _definition.verify is None:
