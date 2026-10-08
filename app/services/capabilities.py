@@ -12,9 +12,23 @@ from app.services.llm import llm_client
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
 VerifierFn = Callable[[dict[str, Any]], None]
 
+_UNSUPPORTED_ACTION_CLAIM_PATTERNS = (
+    r"\b(?:i|we)\s+(?:have\s+)?sent\b",
+    r"\b(?:the\s+)?email\s+(?:has\s+been|was)\s+sent\b",
+    r"\b(?:i|we)\s+(?:have\s+)?(?:booked|purchased|transferred|refunded|deleted|posted|cancelled|canceled)\b",
+    r"\b(?:successfully|already)\s+(?:sent|booked|purchased|transferred|refunded|deleted|posted|cancelled|canceled)\b",
+    r"\b(?:your|the)\s+(?:account|password|order)\s+(?:has\s+been|was)\s+(?:updated|changed|cancelled|canceled|deleted)\b",
+)
+
+def _contains_unsupported_action_claim(text: str) -> bool:
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _UNSUPPORTED_ACTION_CLAIM_PATTERNS)
+
 def _verify_text_response(result: dict[str, Any]) -> None:
-    if not isinstance(result.get("text"), str) or not result["text"].strip():
+    text = result.get("text")
+    if not isinstance(text, str) or not text.strip():
         raise ValueError("respond/execute returned empty text")
+    if _contains_unsupported_action_claim(text):
+        raise ValueError("response claims an external action without execution evidence")
 
 def _verify_fetch_url(result: dict[str, Any]) -> None:
     if not isinstance(result.get("status_code"), int) or not 200 <= result["status_code"] < 300:
@@ -42,6 +56,7 @@ class CapabilityDefinition:
     requires_approval: bool
     handler: Handler
     verify: VerifierFn | None = None
+    establishes_external_action: bool = False
 
 class CapabilityRegistry:
     def __init__(self) -> None:
@@ -215,10 +230,10 @@ def fetch_url(payload: dict[str, Any]) -> dict[str, Any]:
     return {"url": url, "status_code": response.status_code, "content_type": content_type, "text": text}
 
 capability_registry = CapabilityRegistry()
-capability_registry.register(CapabilityDefinition("respond", "Generate a response using the configured LLM.", "low", False, respond_with_llm, _verify_text_response))
-capability_registry.register(CapabilityDefinition("execute", "Compatibility capability for LLM execution.", "low", False, execute_with_llm, _verify_text_response))
-capability_registry.register(CapabilityDefinition("fetch_url", "Fetch a public HTTP(S) URL and return its response.", "external_read", False, fetch_url, _verify_fetch_url))
-capability_registry.register(CapabilityDefinition("summarize_text", "Summarize supplied or dependency-provided text.", "low", False, summarize_text, _verify_summarize_text))
+capability_registry.register(CapabilityDefinition("respond", "Generate a response using the configured LLM.", "low", False, respond_with_llm, _verify_text_response, False))
+capability_registry.register(CapabilityDefinition("execute", "Compatibility capability for LLM execution.", "low", False, execute_with_llm, _verify_text_response, False))
+capability_registry.register(CapabilityDefinition("fetch_url", "Fetch a public HTTP(S) URL and return its response.", "external_read", False, fetch_url, _verify_fetch_url, False))
+capability_registry.register(CapabilityDefinition("summarize_text", "Summarize supplied or dependency-provided text.", "low", False, summarize_text, _verify_summarize_text, False))
 
 for _definition in capability_registry._definitions.values():
     if _definition.verify is None:
