@@ -50,20 +50,14 @@ def test_real_planner_prompt_preserves_memory_as_data(monkeypatch):
     "text",
     [
         "I sent the email successfully.",
-        "The email has been sent.",
-        "I booked the appointment.",
-        "The order was cancelled.",
-        "Your account has been updated.",
-    ],
-)
-def test_respond_verification_rejects_unsupported_external_action_claims(text):
-    with pytest.raises(ValueError, match="external action"):
-        _verify_text_response({"text": text})
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
+        "Email sent!",
+        "Done — email sent.",
+        "I just emailed John about being late.",
+        "John has been notified.",
+        "I've scheduled the appointment.",
+        "I completed the purchase.",
+        "Your profile has been updated.",
+        "Had I sent the email, John would know — but I haven't, since I can't send email.",
         "I cannot send email from the current runtime.",
         "I can help you draft the email, but I did not send it.",
         "I cannot verify whether the appointment was booked.",
@@ -71,7 +65,9 @@ def test_respond_verification_rejects_unsupported_external_action_claims(text):
         "The account update capability is not available.",
     ],
 )
-def test_respond_verification_allows_non_claims(text):
+def test_text_response_verification_does_not_infer_actions_from_prose(text):
+    # Free-form text is not evidence that an external action occurred. Do not
+    # reject it with a brittle regex; action evidence is a separate runtime contract.
     _verify_text_response({"text": text})
 
 
@@ -94,3 +90,55 @@ def test_capability_contract_declares_external_action_authority():
 
     assert capability_registry.definition("respond").establishes_external_action is False
     assert capability_registry.definition("execute").establishes_external_action is False
+
+    
+def test_executor_does_not_fail_honest_disclosure_or_claim_text(monkeypatch):
+    from uuid import uuid4
+    from app.models.mission import MissionStatus
+    from app.models.task import MissionTask, TaskStatus
+    from app.services.executor import task_executor
+    from app.services.llm import llm_client
+    from app.services.missions import mission_store
+    from app.services.tasks import task_store
+
+    responses = iter([
+        "Had I sent the email, John would know — but I haven't, since I can't send email.",
+        "Email sent!",
+    ])
+    monkeypatch.setattr(llm_client, "generate", lambda objective: {
+        "provider": "test", "model": "test", "text": next(responses)
+    })
+
+    for objective in ("Explain email capability limits", "Test unverified action claim"):
+        mission = mission_store.create(objective)
+        task = MissionTask(
+            id=str(uuid4()), mission_id=mission.id, agent="general",
+            action="respond", payload={"objective": objective}, max_retries=0,
+        )
+        task_store.save(task)
+        result = task_executor.execute(task)
+        assert result.status == TaskStatus.COMPLETED
+        assert result.result["output"]["text"]
+        assert result.result["verification"]["external_action_verified"] is False
+        assert mission_store.get(mission.id).status == MissionStatus.COMPLETED
+
+    
+def test_external_action_capability_must_supply_positive_evidence():
+    from app.services.capabilities import CapabilityDefinition, capability_registry
+    from app.services.verification import VerificationError, verifier
+
+    capability_registry.register(CapabilityDefinition(
+        name="test_evidence_required",
+        description="Test-only external action capability.",
+        risk="external_write",
+        requires_approval=True,
+        handler=lambda payload: {"ok": True},
+        verify=lambda result: None,
+        establishes_external_action=True,
+    ))
+    with pytest.raises(VerificationError, match="did not provide external action evidence"):
+        verifier.verify("test_evidence_required", {"ok": True})
+    assert verifier.verify(
+        "test_evidence_required",
+        {"ok": True, "external_action_evidence": True},
+    ) == {"verified": True, "external_action_verified": True}
