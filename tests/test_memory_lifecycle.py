@@ -221,5 +221,9 @@ def test_completed_mission_memory_round_trips_into_later_planning_context(tmp_pa
         "continue the orbital garden launch schedule", memory_context=context
     )
     assert later_plan.steps[0].capability == "respond"
-    assert '"orbital garden launch schedule"' in captured["runtime_contract"]
-    assert '"untrusted_memory"' in captured["runtime_contract"]
+    runtime_contract = __import__("json").loads(captured["runtime_contract"])
+    assert "untrusted_memory" in runtime_contract
+    assert any(
+        item["value"]["objective"] == "prepare orbital garden launch schedule"
+        for item in runtime_contract["untrusted_memory"]
+    )
