@@ -94,3 +94,41 @@ def test_memory_rejects_excessive_nesting():
         value = {"nested": value}
     with pytest.raises(ValueError, match="maximum nesting depth"):
         memory_store.save("owner-a", "deep", value)
+
+
+
+def test_memory_context_finds_relevant_record_beyond_recent_window():
+    owner_id = "relevance-window-owner"
+    memory_store.save(owner_id, "older_reference", {"topic": "quantum orchard"})
+    for index in range(memory_store.DEFAULT_CONTEXT_LIMIT + 10):
+        memory_store.save(owner_id, f"recent_noise_{index}", {"topic": f"unrelated item {index}"})
+
+    context = memory_store.context(owner_id, objective="quantum orchard", limit=5)
+
+    assert any(item["key"] == "older_reference" for item in context)
+
+
+def test_memory_context_can_retrieve_superseded_mission_results():
+    owner_id = "mission-history-context-owner"
+    memory_store.save(
+        owner_id,
+        "last_completed_mission",
+        {"objective": "plan launch timeline", "mission_id": "mission-old"},
+        mission_id="mission-old",
+    )
+    memory_store.save(
+        owner_id,
+        "last_completed_mission",
+        {"objective": "buy groceries", "mission_id": "mission-new"},
+        mission_id="mission-new",
+    )
+
+    context = memory_store.context(owner_id, objective="launch timeline", limit=5)
+
+    old_result = next(
+        (item for item in context if item["mission_id"] == "mission-old"),
+        None,
+    )
+    assert old_result is not None
+    assert old_result["memory_type"] == "mission_result"
+    assert old_result["value"]["objective"] == "plan launch timeline"
