@@ -121,3 +121,24 @@ def test_executor_does_not_fail_honest_disclosure_or_claim_text(monkeypatch):
         assert result.result["output"]["text"]
         assert result.result["verification"]["external_action_verified"] is False
         assert mission_store.get(mission.id).status == MissionStatus.COMPLETED
+
+    
+def test_external_action_capability_must_supply_positive_evidence():
+    from app.services.capabilities import CapabilityDefinition, capability_registry
+    from app.services.verification import VerificationError, verifier
+
+    capability_registry.register(CapabilityDefinition(
+        name="test_evidence_required",
+        description="Test-only external action capability.",
+        risk="external_write",
+        requires_approval=True,
+        handler=lambda payload: {"ok": True},
+        verify=lambda result: None,
+        establishes_external_action=True,
+    ))
+    with pytest.raises(VerificationError, match="did not provide external action evidence"):
+        verifier.verify("test_evidence_required", {"ok": True})
+    assert verifier.verify(
+        "test_evidence_required",
+        {"ok": True, "external_action_evidence": True},
+    ) == {"verified": True, "external_action_verified": True}
