@@ -132,3 +132,94 @@ def test_memory_context_can_retrieve_superseded_mission_results():
     assert old_result is not None
     assert old_result["memory_type"] == "mission_result"
     assert old_result["value"]["objective"] == "plan launch timeline"
+
+
+
+def test_completed_mission_memory_round_trips_into_later_planning_context(tmp_path, monkeypatch):
+    """A completed mission persists a verified result that a later plan can retrieve."""
+    from threading import Lock
+
+    from app.models.mission import MissionStatus
+    from app.models.task import MissionTask, TaskStatus
+    from app.services import executor as executor_module
+    from app.services import memory as memory_module
+    from app.services import missions as missions_module
+    from app.services import tasks as tasks_module
+    from app.services.executor import task_executor
+    from app.services.storage import Storage
+
+    isolated_storage = Storage.__new__(Storage)
+    isolated_storage.path = tmp_path
+    isolated_storage.db = tmp_path / "roundtrip.db"
+    isolated_storage._lock = Lock()
+    isolated_storage._init()
+
+    monkeypatch.setattr(memory_module, "storage", isolated_storage)
+    monkeypatch.setattr(missions_module, "storage", isolated_storage)
+    monkeypatch.setattr(tasks_module, "storage", isolated_storage)
+
+    owner_id = "roundtrip-owner"
+    mission = missions_module.MissionStore().create(
+        "prepare orbital garden launch schedule", owner_id=owner_id
+    )
+    mission.status = MissionStatus.RUNNING
+    missions_module.MissionStore().update(mission)
+
+    task = MissionTask(
+        id="roundtrip-task",
+        mission_id=mission.id,
+        agent="general",
+        action="respond",
+        status=TaskStatus.COMPLETED,
+        attempts=1,
+        result={
+            "agent": "general",
+            "action": "respond",
+            "output": {"text": "Drafted an orbital garden launch schedule."},
+            "verification": {"verified": True},
+        },
+    )
+    tasks_module.task_store.save(task)
+
+    # Use the executor's real mission-completion path to write memory.
+    monkeypatch.setattr(executor_module, "mission_store", missions_module.MissionStore())
+    monkeypatch.setattr(executor_module, "task_store", tasks_module.task_store)
+    task_executor._update_mission_after_task(task)
+
+    persisted_mission = missions_module.MissionStore().get(mission.id)
+    assert persisted_mission.status == MissionStatus.COMPLETED
+    assert persisted_mission.result["verified"] is True
+
+    # A fresh store instance reads the same SQLite database, simulating a process restart.
+    restarted_memory_store = memory_module.MemoryStore()
+    context = restarted_memory_store.context(
+        owner_id, objective="orbital garden launch schedule", limit=5
+    )
+    record = next(item for item in context if item["mission_id"] == mission.id)
+    assert record["memory_type"] == "mission_result"
+    assert record["value"]["result"]["verified"] is True
+
+    captured = {}
+
+    def fake_plan(objective, runtime_contract=None):
+        captured["runtime_contract"] = runtime_contract
+        return {"steps": [{
+            "id": "later-step",
+            "objective": objective,
+            "capability": "respond",
+            "agent": "general",
+            "payload": {"objective": objective},
+            "requires_approval": False,
+            "depends_on": [],
+        }]}
+
+    from app.services.llm import llm_client
+    from app.services.planner import Planner
+
+    monkeypatch.setattr(llm_client, "plan", fake_plan)
+    later_plan = Planner().plan(
+        "continue the orbital garden launch schedule", memory_context=context
+    )
+    assert later_plan.steps[0].capability == "respond"
+    assert '"orbital garden launch schedule"' in captured["runtime_contract"]
+    assert '"untrusted_memory"' in captured["runtime_contract"]
