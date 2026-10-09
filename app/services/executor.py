@@ -33,6 +33,10 @@ class TaskExecutor:
         handler = definition.handler
         try:
             call_payload = dict(task.payload)
+            # Dependency outputs are runtime-owned control data. Never trust a
+            # planner/model-supplied _dependencies value, even for tasks with
+            # no declared dependencies.
+            call_payload.pop("_dependencies", None)
             dependency_outputs = self._dependency_outputs(task)
             if dependency_outputs:
                 call_payload["_dependencies"] = dependency_outputs
