@@ -236,8 +236,14 @@ def get_task(
 
 
 @router.get("/events", dependencies=[Depends(require_api_key)])
-def recent_events(limit: int = 50):
-    return event_bus.recent(max(1, min(limit, 100)))
+def recent_events(
+    limit: int = 50,
+    x_aibo_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    aibo_session: str | None = Cookie(default=None),
+):
+    owner_id = _owner_from_request(x_aibo_api_key, authorization, aibo_session)
+    return event_bus.recent(max(1, min(limit, 100)), owner_id=owner_id)
 
 
 @router.get("/worker", dependencies=[Depends(require_api_key)])
