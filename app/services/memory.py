@@ -11,6 +11,7 @@ class MemoryStore:
     MAX_VALUE_BYTES = 16_384
     MAX_VALUE_DEPTH = 8
     DEFAULT_CONTEXT_LIMIT = 20
+    MAX_CONTEXT_CANDIDATES = 200
     MAX_HISTORY_LIMIT = 100
     MEMORY_TYPES = {"fact", "preference", "decision", "experience", "mission_result"}
     SENSITIVE_FIELD_NAMES = {
@@ -114,12 +115,25 @@ class MemoryStore:
         return {token for token in re.findall(r"[a-z0-9_]+", str(text).lower()) if len(token) > 2}
 
     def context(self, owner_id: str, objective: str | None = None, limit: int = DEFAULT_CONTEXT_LIMIT):
-        """Return bounded owner memory ranked by lexical relevance.
+        """Return bounded owner memory ranked by relevance.
 
-        Retrieved memory is untrusted context/data only; it cannot alter runtime control state.
+        Candidates include current memories and prior mission results, but never other
+        owners' records. Retrieved memory is untrusted context/data only; it cannot
+        alter runtime control state. Candidate retrieval and final context are bounded.
         """
         limit = max(1, min(int(limit), self.DEFAULT_CONTEXT_LIMIT))
-        memories = self.list(owner_id, limit=self.DEFAULT_CONTEXT_LIMIT)
+        rows = storage.execute(
+            """SELECT key,value,mission_id,memory_type,created_at,superseded
+               FROM memory_history
+               WHERE owner_id=? AND (superseded=0 OR memory_type='mission_result')
+               ORDER BY id DESC LIMIT ?""",
+            (owner_id, self.MAX_CONTEXT_CANDIDATES),
+        )
+        memories = [
+            {"key": row["key"], "value": json.loads(row["value"]), "mission_id": row["mission_id"],
+             "memory_type": row["memory_type"], "created_at": row["created_at"]}
+            for row in rows
+        ]
         if not objective:
             return memories[:limit]
         objective_tokens = self._tokens(objective)
