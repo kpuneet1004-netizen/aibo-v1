@@ -57,6 +57,11 @@ def remember(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("runtime mission ownership is required to save memory")
     if not key:
         raise ValueError("key is required to save memory")
+    normalized_key = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+    if normalized_key in memory_store.SENSITIVE_FIELD_NAMES:
+        raise ValueError("sensitive memory keys are not allowed")
+    if normalized_key == "last_completed_mission":
+        raise ValueError("last_completed_mission is reserved for verified runtime history")
     if "value" not in payload:
         raise ValueError("value is required to save memory")
     memory_type = str(payload.get("memory_type", "fact")).strip().lower()
