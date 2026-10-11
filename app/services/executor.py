@@ -37,9 +37,17 @@ class TaskExecutor:
             # planner/model-supplied _dependencies value, even for tasks with
             # no declared dependencies.
             call_payload.pop("_dependencies", None)
+            call_payload.pop("_runtime_owner_id", None)
+            call_payload.pop("_runtime_mission_id", None)
             dependency_outputs = self._dependency_outputs(task)
             if dependency_outputs:
                 call_payload["_dependencies"] = dependency_outputs
+            if task.action == "remember":
+                mission = mission_store.get(task.mission_id)
+                if mission is None or not mission.owner_id:
+                    raise RuntimeError("cannot save memory without a stored mission owner")
+                call_payload["_runtime_owner_id"] = mission.owner_id
+                call_payload["_runtime_mission_id"] = mission.id
             output = handler(call_payload)
             verification = verifier.verify(task.action, output)
             task.result = {"agent": agent.name, "action": task.action, "output": output, "verification": verification}

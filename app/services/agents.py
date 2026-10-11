@@ -17,7 +17,7 @@ class AgentRegistry:
 agent_registry = AgentRegistry()
 
 for _agent in (
-    AgentDefinition(name="general", description="General Aibo reasoning, web retrieval, and response agent.", capabilities=["respond", "execute", "fetch_url", "summarize_text"]),
+    AgentDefinition(name="general", description="General Aibo reasoning, web retrieval, and response agent.", capabilities=["respond", "execute", "fetch_url", "summarize_text", "remember"]),
     AgentDefinition(name="design", description="Creates and refines visual design work.", capabilities=["design", "image_generation", "design_review", "execute"]),
     AgentDefinition(name="social", description="Plans and prepares social media content.", capabilities=["content", "caption", "hashtags", "social_planning", "execute"]),
     AgentDefinition(name="mockup", description="Creates approved apparel product mockups.", capabilities=["mockup", "ecommerce", "product_assets", "execute"]),
