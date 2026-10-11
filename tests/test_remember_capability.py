@@ -91,3 +91,12 @@ def test_executor_overwrites_forged_memory_owner_with_stored_mission_owner(tmp_p
     definition = capability_registry.definition("remember")
     assert definition is not None
     assert definition.requires_approval is True
+
+
+def test_remember_rejects_sensitive_or_reserved_keys(tmp_path, monkeypatch):
+    _isolated_memory_store(tmp_path, monkeypatch)
+    runtime = {"_runtime_owner_id": "owner-a", "_runtime_mission_id": "mission-a", "value": "do not persist"}
+    with pytest.raises(ValueError, match="sensitive memory keys"):
+        remember({**runtime, "key": "api_key", "memory_type": "fact"})
+    with pytest.raises(ValueError, match="reserved"):
+        remember({**runtime, "key": "last_completed_mission", "memory_type": "mission_result"})
