@@ -8,6 +8,7 @@ import re
 import socket
 import httpx
 from app.services.llm import llm_client
+from app.services.memory import memory_store
 
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
 VerifierFn = Callable[[dict[str, Any]], None]
@@ -37,6 +38,33 @@ def _verify_fetch_url(result: dict[str, Any]) -> None:
         raise ValueError("fetch_url returned no URL")
     if not isinstance(result.get("text"), str):
         raise ValueError("fetch_url returned no text")
+
+def _verify_remember(result: dict[str, Any]) -> None:
+    if result.get("persisted") is not True:
+        raise ValueError("remember did not confirm persistence")
+    if not isinstance(result.get("key"), str) or not result["key"].strip():
+        raise ValueError("remember returned no memory key")
+    if result.get("memory_type") not in memory_store.MEMORY_TYPES:
+        raise ValueError("remember returned an invalid memory type")
+
+def remember(payload: dict[str, Any]) -> dict[str, Any]:
+    # These values are injected by the executor from the stored mission,
+    # never accepted from planner-controlled payload fields.
+    owner_id = str(payload.pop("_runtime_owner_id", "")).strip()
+    mission_id = str(payload.pop("_runtime_mission_id", "")).strip()
+    key = str(payload.get("key", "")).strip()
+    if not owner_id or not mission_id:
+        raise ValueError("runtime mission ownership is required to save memory")
+    if not key:
+        raise ValueError("key is required to save memory")
+    if "value" not in payload:
+        raise ValueError("value is required to save memory")
+    memory_type = str(payload.get("memory_type", "fact")).strip().lower()
+    memory_store.save(owner_id, key, payload["value"], mission_id=mission_id, memory_type=memory_type)
+    # Read-after-write check makes persistence part of the capability's result contract.
+    if memory_store.get(owner_id, key) != payload["value"]:
+        raise RuntimeError("memory write could not be verified")
+    return {"key": key, "memory_type": memory_type, "mission_id": mission_id, "persisted": True}
 
 def _verify_summarize_text(result: dict[str, Any]) -> None:
     summary = result.get("summary")
@@ -234,6 +262,7 @@ capability_registry.register(CapabilityDefinition("respond", "Generate a respons
 capability_registry.register(CapabilityDefinition("execute", "Compatibility capability for LLM execution.", "low", False, execute_with_llm, _verify_text_response, False))
 capability_registry.register(CapabilityDefinition("fetch_url", "Fetch a public HTTP(S) URL and return its response.", "external_read", False, fetch_url, _verify_fetch_url, False))
 capability_registry.register(CapabilityDefinition("summarize_text", "Summarize supplied or dependency-provided text.", "low", False, summarize_text, _verify_summarize_text, False))
+capability_registry.register(CapabilityDefinition("remember", "Persist a user-requested fact, preference, decision, experience, or mission note.", "medium", True, remember, _verify_remember, False))
 
 for _definition in capability_registry._definitions.values():
     if _definition.verify is None:
