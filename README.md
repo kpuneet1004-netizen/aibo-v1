@@ -21,10 +21,13 @@ The LLM proposes intent and sequencing. The runtime owns state, permissions, exe
 
 ## Current runtime capabilities
 
-The deterministic test runtime currently exposes:
+The current runtime capability registry exposes:
 - `respond`: generate an Aibo response through the configured LLM provider.
 - `execute`: compatibility alias for `respond`.
 - `fetch_url`: fetch a public HTTP(S) URL with response-size limits and DNS/IP safety checks.
+- `summarize_text`: summarize supplied text or verified text returned by a dependency step.
+
+The `general` agent is authorized to use these capabilities. Consequential capabilities must be registered with a verification contract and pass the runtime permission policy before execution.
 
 External integrations are intentionally not faked. New capabilities should be added only when their real execution and verification path exists.
 
@@ -47,7 +50,8 @@ curl -X POST http://localhost:8000/v1/missions \
 Inspect a mission:
 
 ```bash
-curl http://localhost:8000/v1/missions/<mission_id>
+curl http://localhost:8000/v1/missions/<mission_id> \\
+  -H "X-Aibo-API-Key: $AIBO_API_KEY"
 ```
 
 When `APP_ENV=production`, all `/v1` endpoints require the `X-Aibo-API-Key` header. Keep `AIBO_API_KEY` secret and never commit it.
@@ -55,19 +59,22 @@ When `APP_ENV=production`, all `/v1` endpoints require the `X-Aibo-API-Key` head
 Approve a mission waiting for authorization:
 
 ```bash
-curl -X POST http://localhost:8000/v1/missions/<mission_id>/approve
+curl -X POST http://localhost:8000/v1/missions/<mission_id>/approve \\
+  -H "X-Aibo-API-Key: $AIBO_API_KEY"
 ```
 
 Inspect a task:
 
 ```bash
-curl http://localhost:8000/v1/tasks/<task_id>
+curl http://localhost:8000/v1/tasks/<task_id> \\
+  -H "X-Aibo-API-Key: $AIBO_API_KEY"
 ```
 
 Inspect recent events:
 
 ```bash
-curl http://localhost:8000/v1/events
+curl http://localhost:8000/v1/events \\
+  -H "X-Aibo-API-Key: $AIBO_API_KEY"
 ```
 
 ## LLM configuration
