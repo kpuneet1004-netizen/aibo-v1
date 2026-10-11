@@ -20,3 +20,15 @@ def test_phone_app_serves_voice_ui_and_pwa_assets():
     assert service_worker.status_code == 200
     assert "serviceWorker" not in service_worker.text
     assert "self.addEventListener(\"fetch\"" in service_worker.text
+
+
+
+def test_phone_app_displays_and_speaks_real_mission_response():
+    with TestClient(app) as client:
+        page = client.get("/app")
+
+    assert page.status_code == 200
+    assert "function extractMissionResponse(result)" in page.text
+    assert 'const response=extractMissionResponse(mission.result)' in page.text
+    assert 'speak(response.slice(0,1200))' in page.text
+    assert 'Mission completed, but I couldn\'t extract a readable response.' in page.text
