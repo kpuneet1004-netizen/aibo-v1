@@ -100,3 +100,33 @@ def test_remember_rejects_sensitive_or_reserved_keys(tmp_path, monkeypatch):
         remember({**runtime, "key": "api_key", "memory_type": "fact"})
     with pytest.raises(ValueError, match="reserved"):
         remember({**runtime, "key": "last_completed_mission", "memory_type": "mission_result"})
+
+
+def test_planner_can_propose_remember_but_runtime_requires_approval(monkeypatch):
+    from app.services.llm import llm_client
+    from app.services.planner import Planner
+
+    monkeypatch.setattr(
+        llm_client,
+        "plan",
+        lambda objective, runtime_contract=None: {
+            "steps": [{
+                "id": "step-1",
+                "objective": "Remember the user's preference",
+                "capability": "remember",
+                "agent": "general",
+                "payload": {
+                    "key": "preferred_tone",
+                    "value": "concise",
+                    "memory_type": "preference",
+                },
+                "requires_approval": False,
+                "depends_on": [],
+            }]
+        },
+    )
+
+    plan = Planner().plan("Remember that I prefer concise answers")
+
+    assert plan.steps[0].capability == "remember"
+    assert plan.steps[0].requires_approval is True
