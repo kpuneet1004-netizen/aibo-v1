@@ -40,7 +40,11 @@ class LLMClient:
         if not settings.llm_api_key:
             raise LLMError("LLM API key is not configured")
         url = settings.llm_base_url.rstrip("/") + "/chat/completions"
-        payload = {"model": settings.llm_model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "temperature": 0.1}
+        payload = {"model": settings.llm_model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        # Newer GPT-5 reasoning models have model-specific sampling parameter
+        # support; omit temperature rather than sending an unsupported override.
+        if not settings.llm_model.lower().startswith("gpt-5"):
+            payload["temperature"] = 0.1
         try:
             response = httpx.post(url, headers={"Authorization": f"Bearer {settings.llm_api_key}", "Content-Type": "application/json"}, json=payload, timeout=60.0)
             response.raise_for_status()

@@ -70,9 +70,21 @@ Inspect recent events:
 curl http://localhost:8000/v1/events
 ```
 
-## LLM configuration
+## LLM configuration and Railway deployment
 
-Copy `.env.example` to `.env` and configure the provider when using a real OpenAI-compatible endpoint. CI and deterministic tests use the stub provider.
+CI and local deterministic tests use the stub provider. For real AI responses on Railway, configure these service variables (do not commit or paste secrets into GitHub):
+
+- `APP_ENV=production`
+- `AIBO_API_KEY`: a long, random secret used by the phone's initial session exchange
+- `LLM_PROVIDER=openai_compatible`
+- `LLM_BASE_URL=https://api.openai.com/v1`
+- `LLM_API_KEY`: your provider API key
+- `LLM_MODEL=gpt-5-mini` (or another model ID enabled for your API key)
+- `DATA_DIR=/app/data`
+
+Attach a Railway persistent volume mounted at `/app/data` so mission state and memory survive redeploys. The Docker image binds to Railway's injected `PORT` and its health check uses that same port. Configure the Railway health check path as `/health`, then verify `/health` returns HTTP 200 and `/app` loads over HTTPS.
+
+The app intentionally defaults to `LLM_PROVIDER=stub` for deterministic development. Setting `APP_ENV=production` without `AIBO_API_KEY` prevents startup. CI does not validate provider credentials or a live Railway deployment.
 
 ## Persistence and recovery
 
