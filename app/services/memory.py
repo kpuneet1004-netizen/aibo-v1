@@ -141,7 +141,10 @@ class MemoryStore:
         for index, item in enumerate(memories):
             searchable = " ".join((item["key"], item["memory_type"], json.dumps(item["value"], ensure_ascii=False)))
             score = len(objective_tokens & self._tokens(searchable))
-            ranked.append((score, -index, item))
+            # Do not pad context with unrelated memories when no objective
+            # terms match. Zero-score records are not relevant evidence.
+            if score > 0:
+                ranked.append((score, -index, item))
         ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
         return [item for _, _, item in ranked[:limit]]
 
