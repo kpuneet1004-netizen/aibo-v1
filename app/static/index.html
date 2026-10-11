@@ -52,6 +52,20 @@ const finalStatuses=new Set(["completed","failed","cancelled","waiting_approval"
 function connected(){ $("login").classList.add("hidden"); $("mission").classList.remove("hidden"); }
 function speak(text){if(!text||!("speechSynthesis" in window))return;window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(text);utterance.lang=navigator.language||"en-IN";utterance.rate=.98;window.speechSynthesis.speak(utterance);}
 function showResult(text,voiceText=null){$("result").classList.remove("hidden");$("status").textContent=text;if(voiceText)speak(voiceText);}
+function extractMissionResponse(result){
+  if(!result||!Array.isArray(result.steps))return "";
+  const parts=[];
+  for(const step of result.steps){
+    const output=step&&step.output;
+    if(!output||typeof output!=="object")continue;
+    const text=typeof output.text==="string"?output.text.trim():"";
+    const summary=typeof output.summary==="string"?output.summary.trim():"";
+    const value=summary||text;
+    if(value)parts.push(value);
+    else if(typeof output.content==="string"&&output.content.trim())parts.push(output.content.trim());
+  }
+  return parts.join("\n\n");
+}
 function setupSpeech(){
   const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SpeechRecognition){$("listen").disabled=true;$("support").textContent="Voice input is not supported by this browser. Use a supported mobile browser or type the command.";return;}
@@ -95,8 +109,15 @@ async function pollMission(){
     const mission=await r.json();$("status").textContent="Mission "+currentMissionId+"\nStatus: "+mission.status+(mission.error?"\n\nError: "+mission.error:"");
     if(mission.status==="waiting_approval"){$("approval").classList.remove("hidden");speak("This mission needs your approval before I continue.");return;}
     if(finalStatuses.has(mission.status)){
-      if(mission.result)$("status").textContent+="\n\n"+JSON.stringify(mission.result,null,2);
-      if(mission.status==="completed")speak("Mission completed.");else if(mission.status==="failed")speak("The mission failed. Please check the result.");
+      const response=extractMissionResponse(mission.result);
+      if(mission.status==="completed"&&response){
+        $("status").textContent+="\n\n"+response;
+        speak(response.slice(0,1200));
+      }else if(mission.result){
+        $("status").textContent+="\n\n"+JSON.stringify(mission.result,null,2);
+        if(mission.status==="completed")speak("Mission completed, but I couldn't extract a readable response.");
+      }else if(mission.status==="completed")speak("Mission completed.");
+      if(mission.status==="failed")speak("The mission failed. Please check the result.");
       return;
     }
   }
